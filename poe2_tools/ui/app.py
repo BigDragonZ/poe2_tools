@@ -4,6 +4,7 @@
 主窗口：运行状态区 + 四模块标签页 + 日志区，负责全局热键注册。
 
 - 整理热键（默认 F1，可在背包整理页修改）：一键存仓
+- 战斗热键（默认 F2，可在战斗页修改）：战斗巡航启停
 - F3 / F4：标定背包同一行相邻两格中心
 - F12：紧急停止所有任务并释放按键
 """
@@ -26,7 +27,7 @@ import keyboard
 import tkinter as tk
 from tkinter import scrolledtext, ttk
 
-from poe2_tools import bag, common
+from poe2_tools import bag, combat, common
 from poe2_tools.ui.bag_tab import BagTab
 from poe2_tools.ui.combat_tab import CombatTab
 from poe2_tools.ui.placeholder_tab import PlaceholderTab
@@ -50,6 +51,7 @@ class Poe2ToolsApp:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self.hotkey_handlers: dict[str, object] = {}
+        self.macro = combat.CombatMacro()
 
         self._build_status()
         self._build_tabs()
@@ -58,6 +60,7 @@ class Poe2ToolsApp:
         self.register_hotkeys()
         self.log(
             f"控制台已启动。整理热键: {bag.get_dump_hotkey()}，"
+            f"战斗热键: {combat.get_toggle_hotkey()}，"
             f"标定: F3/F4，停止: {STOP_HOTKEY}"
         )
         self.update_status()
@@ -73,6 +76,7 @@ class Poe2ToolsApp:
         self.poe_var = tk.StringVar(value="检测中…")
         self.cal_var = tk.StringVar(value="检测中…")
         self.dump_var = tk.StringVar(value="空闲")
+        self.combat_var = tk.StringVar(value="空闲")
 
         ttk.Label(status_frame, text="POE2 前台:").grid(row=0, column=0, sticky=tk.W)
         ttk.Label(status_frame, textvariable=self.poe_var, foreground="#22c55e").grid(
@@ -84,7 +88,11 @@ class Poe2ToolsApp:
         )
         ttk.Label(status_frame, text="整理状态:").grid(row=0, column=4, sticky=tk.W)
         ttk.Label(status_frame, textvariable=self.dump_var, foreground="#f59e0b").grid(
-            row=0, column=5, sticky=tk.W, padx=(4, 0)
+            row=0, column=5, sticky=tk.W, padx=(4, 20)
+        )
+        ttk.Label(status_frame, text="战斗状态:").grid(row=0, column=6, sticky=tk.W)
+        ttk.Label(status_frame, textvariable=self.combat_var, foreground="#f472b6").grid(
+            row=0, column=7, sticky=tk.W, padx=(4, 0)
         )
 
     def _build_tabs(self) -> None:
@@ -94,7 +102,10 @@ class Poe2ToolsApp:
 
         self.bag_tab = BagTab(notebook, log=self.log, on_hotkey_changed=self.register_hotkeys)
         notebook.add(self.bag_tab, text="背包整理")
-        notebook.add(CombatTab(notebook), text="战斗")
+        notebook.add(
+            CombatTab(notebook, log=self.log, on_hotkey_changed=self.register_hotkeys),
+            text="战斗",
+        )
         notebook.add(PlaceholderTab(notebook, "地图"), text="地图")
         notebook.add(PlaceholderTab(notebook, "装备"), text="装备")
 
@@ -141,6 +152,9 @@ class Poe2ToolsApp:
         self.hotkey_handlers.clear()
 
         self.hotkey_handlers["dump"] = keyboard.add_hotkey(bag.get_dump_hotkey(), self.start_dump)
+        self.hotkey_handlers["combat"] = keyboard.add_hotkey(
+            combat.get_toggle_hotkey(), lambda: self.macro.toggle(logger=self.log)
+        )
         self.hotkey_handlers["cal1"] = keyboard.add_hotkey(
             CALIBRATE_KEY_FIRST, lambda: bag.calibrate_point(1, logger=self.log)
         )
@@ -157,6 +171,7 @@ class Poe2ToolsApp:
         self.poe_var.set("是" if common.is_poe_active() else "否")
         self.cal_var.set("已标定" if bag.get_grid_config() is not None else "未标定")
         self.dump_var.set("运行中" if common.running else "空闲")
+        self.combat_var.set("运行中" if self.macro.active else "空闲")
         self.root.after(500, self.update_status)
 
     # ============================================================
@@ -181,6 +196,7 @@ class Poe2ToolsApp:
     def emergency_stop(self) -> None:
         """F12：停止所有任务并释放按键。"""
         common.emergency_stop(logger=self.log)
+        self.macro.stop(logger=self.log)
 
     # ============================================================
     # 退出清理
@@ -189,6 +205,7 @@ class Poe2ToolsApp:
         """关闭窗口时释放资源。"""
         self.log("正在退出…")
         common.emergency_stop()
+        self.macro.stop()
 
         try:
             keyboard.unhook_all()

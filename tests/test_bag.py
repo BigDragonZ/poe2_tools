@@ -4,30 +4,13 @@
 
 from __future__ import annotations
 
-import configparser
 from pathlib import Path
 
 import pytest
 
-from poe2_tools import bag, common
+from poe2_tools import bag
 
-
-@pytest.fixture(autouse=True)
-def temp_ini(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """把配置文件重定向到临时目录，避免污染真实配置。"""
-    ini = tmp_path / "poe2_tools.ini"
-    monkeypatch.setattr(common, "INI_PATH", ini)
-    return ini
-
-
-def write_ini(ini: Path, values: dict[str, str]) -> None:
-    config = configparser.ConfigParser()
-    config.optionxform = str
-    config.add_section("Bag")
-    for key, value in values.items():
-        config.set("Bag", key, value)
-    with open(ini, "w", encoding="utf-8") as f:
-        config.write(f)
+from conftest import write_ini
 
 
 # ============================================================
@@ -63,7 +46,7 @@ def test_dump_hotkey_roundtrip() -> None:
 
 
 def test_dump_hotkey_blank_falls_back(temp_ini: Path) -> None:
-    write_ini(temp_ini, {"DumpHotkey": "   "})
+    write_ini(temp_ini, "Bag", {"DumpHotkey": "   "})
     assert bag.get_dump_hotkey() == bag.DEFAULT_DUMP_HOTKEY
 
 
@@ -85,7 +68,7 @@ def test_grid_size_clamps_to_at_least_one() -> None:
 
 
 def test_grid_size_invalid_falls_back(temp_ini: Path) -> None:
-    write_ini(temp_ini, {"Rows": "abc", "Cols": ""})
+    write_ini(temp_ini, "Bag", {"Rows": "abc", "Cols": ""})
     assert bag.get_grid_size() == (bag.DEFAULT_ROWS, bag.DEFAULT_COLS)
 
 
@@ -98,17 +81,17 @@ def test_grid_config_none_without_calibration() -> None:
 
 @pytest.mark.parametrize("cell", ["0", "-5", "abc", ""])
 def test_grid_config_none_with_invalid_cell(temp_ini: Path, cell: str) -> None:
-    write_ini(temp_ini, {"CellSize": cell})
+    write_ini(temp_ini, "Bag", {"CellSize": cell})
     assert bag.get_grid_config() is None
 
 
 def test_grid_config_ok(temp_ini: Path) -> None:
-    write_ini(temp_ini, {"CellSize": "52", "Rows": "5", "Cols": "11"})
+    write_ini(temp_ini, "Bag", {"CellSize": "52", "Rows": "5", "Cols": "11"})
     assert bag.get_grid_config() == (52.0, 5, 11)
 
 
 def test_grid_config_uses_default_size(temp_ini: Path) -> None:
-    write_ini(temp_ini, {"CellSize": "52"})
+    write_ini(temp_ini, "Bag", {"CellSize": "52"})
     assert bag.get_grid_config() == (52.0, bag.DEFAULT_ROWS, bag.DEFAULT_COLS)
 
 
