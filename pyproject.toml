@@ -1,0 +1,15 @@
+[project]
+name = "poe2-tools"
+version = "0.1.0"
+description = "POE2 游玩辅助工具：背包整理、战斗巡航、地图、装备"
+requires-python = ">=3.11"
+dependencies = [
+    "pydirectinput",
+    "keyboard",
+    "mouse",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
