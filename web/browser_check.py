@@ -55,9 +55,12 @@ def main():
         check("一级菜单（经济/策略/做装/开荒）", nav_texts == ["经济", "策略", "做装", "开荒"],
               str(nav_texts))
 
-        # 3. 左侧三级菜单：14 个经济模块
-        module_items = page.locator(".sidebar .half:not(.seasons) .side-item")
+        # 3. 内容区左侧三级菜单：14 个经济模块
+        module_items = page.locator(".module-col .side-item")
         check("经济模块数量=14", module_items.count() == 14, f"实际 {module_items.count()}")
+        check("模块列在主内容区左侧、边栏仅含赛季",
+              page.locator(".main .module-col").count() == 1 and
+              page.locator(".sidebar .module-col").count() == 0)
 
         # 4. 赛季列表存在且默认选中
         season_items = page.locator(".sidebar .half.seasons .side-item")
@@ -67,7 +70,7 @@ def main():
               active_season.inner_text() if active_season.count() else "无选中")
 
         # 5. 切换到「通貨」模块，等待表格数据
-        page.locator(".sidebar .half:not(.seasons) .side-item", has_text="通貨").first.click()
+        page.locator(".module-col .side-item", has_text="通貨").first.click()
         page.wait_for_selector("table.eco tbody tr", timeout=10000)
         row_count = page.locator("table.eco tbody tr").count()
         check("通貨模块表格有数据", row_count > 0, f"{row_count} 行")
