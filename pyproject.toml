@@ -7,10 +7,16 @@ dependencies = [
     "pydirectinput",
     "keyboard",
     "mouse",
+    "fastapi>=0.141.1",
+    "uvicorn>=0.53.0",
+    "apscheduler>=3.11.3",
+    "beautifulsoup4>=4.15.0",
+    "requests>=2.34.2",
 ]
 
 [dependency-groups]
 dev = [
+    "playwright>=1.62.0",
     "pytest",
 ]
 

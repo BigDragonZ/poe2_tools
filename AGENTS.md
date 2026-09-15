@@ -63,6 +63,15 @@ D:/game/poe2_tools/
 │       ├── combat_tab.py   # 战斗页
 │       └── placeholder_tab.py  # 占位页（地图/装备）
 ├── tests/                  # pytest 单元测试（纯逻辑）
+├── web/                    # POE2 经济记录 Web 应用（FastAPI + React CDN + SQLite，独立于桌面工具）
+│   ├── app.py              # FastAPI 入口：`uv run python -m web.app`（端口 8321）
+│   ├── scraper.py          # 抓取+解析 poe2db.tw 14 个经济模块（解析与网络分离，便于测试）
+│   ├── db.py               # SQLite schema 与读写（写操作全局锁串行化）
+│   ├── icons.py            # 图标下载缓存到本地
+│   ├── service.py          # 刷新任务编排与进度（手动单模块/全量）
+│   ├── scheduler.py        # APScheduler 定时抓取（开服前 2 周每天抓，之后每周抓，可配置）
+│   ├── static/             # index.html（React 18 CDN 单页）+ icons/（图标缓存，不入库）
+│   └── data/               # economy.db（不入库）
 ├── poe2_tools.ini          # 本机标定与热键配置（UTF-8，不入库）
 ├── docs/                   # 项目文档与功能文档
 ├── changelog/              # 变更日志明细（见第 5 节规范）
@@ -85,7 +94,8 @@ D:/game/poe2_tools/
 
 1. 首次运行前执行 `uv sync` 安装依赖
 2. `uv run python main.py` 启动主界面
-3. `uv run pytest` 运行单元测试
+3. `uv run python -m web.app` 启动经济记录 Web 应用（http://127.0.0.1:8321 ）
+4. `uv run pytest` 运行单元测试
 
 ### 验证策略
 

@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 *.pyo
 poe2_tools.ini
+web/data/
+web/static/icons/

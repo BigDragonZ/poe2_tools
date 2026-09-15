@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>POE2 经济记录</title>
+<link rel="icon" href="data:,">
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #1a1a1a; color: #d8d8d8;
+         font-family: "Microsoft YaHei", "PingFang SC", sans-serif; font-size: 14px; }
+  a { color: #9ab; }
+  /* 顶部一级菜单 */
+  .topnav { display: flex; gap: 4px; background: #111; padding: 0 16px;
+            border-bottom: 1px solid #333; }
+  .topnav .item { padding: 12px 22px; cursor: pointer; color: #888; }
+  .topnav .item.active { color: #fff; border-bottom: 2px solid #c8aa6e; background: #1a1a1a; }
+  .topnav .item.disabled { color: #555; cursor: not-allowed; }
+  .layout { display: flex; min-height: calc(100vh - 46px); }
+  /* 左侧边栏 */
+  .sidebar { width: 210px; background: #151515; border-right: 1px solid #2c2c2c;
+             display: flex; flex-direction: column; }
+  .sidebar .half { padding: 8px 0; overflow-y: auto; }
+  .sidebar .half.seasons { max-height: 40%; border-bottom: 1px solid #2c2c2c; }
+  .sidebar h4 { margin: 6px 14px; color: #777; font-size: 12px; font-weight: normal; }
+  .side-item { display: flex; align-items: center; gap: 8px; padding: 6px 14px;
+               cursor: pointer; color: #bbb; white-space: nowrap; }
+  .side-item:hover { background: #202020; }
+  .side-item.active { background: #2a2a2a; color: #fff; border-left: 3px solid #c8aa6e; }
+  .side-item img { width: 22px; height: 22px; }
+  /* 主区 */
+  .main { flex: 1; padding: 16px 20px; overflow-x: auto; }
+  .main h2 { margin: 0 0 4px; font-size: 18px; color: #eee; }
+  .meta-line { color: #999; margin-bottom: 12px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+  select, input[type="text"], input[type="date"], input[type="time"], input[type="number"] {
+    background: #222; color: #ddd; border: 1px solid #444; padding: 5px 8px; border-radius: 3px; }
+  button { background: #3a3a3a; color: #eee; border: 1px solid #555; padding: 6px 14px;
+           border-radius: 3px; cursor: pointer; }
+  button:hover { background: #4a4a4a; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.primary { background: #6b5b2e; border-color: #c8aa6e; }
+  .panel { background: #1f1f1f; border: 1px solid #333; border-radius: 4px;
+           padding: 10px 14px; margin-bottom: 12px; }
+  .panel .panel-title { cursor: pointer; color: #c8aa6e; user-select: none; }
+  .panel .row { display: flex; gap: 10px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+  /* 表格（复刻原站深色样式） */
+  table.eco { width: 100%; border-collapse: collapse; background: #1a1a1a; }
+  table.eco th { text-align: left; padding: 8px 10px; color: #aaa; font-weight: normal;
+                 border-bottom: 2px solid #333; white-space: nowrap; }
+  table.eco th.sortable { cursor: pointer; }
+  table.eco th.sortable:hover { color: #eee; }
+  table.eco td { padding: 6px 10px; border-bottom: 1px solid #262626; vertical-align: middle; }
+  table.eco tr:hover td { background: #222; }
+  .name-cell { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .name-main { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .name-main img { width: 32px; height: 32px; flex: none; }
+  .name-zh { color: #e8e8e8; }
+  .name-en { color: #777; font-size: 11px; }
+  .wiki-link { border: 1px solid #555; padding: 2px 6px; font-size: 11px; color: #9ab;
+               text-decoration: none; border-radius: 2px; flex: none; }
+  .wiki-link:hover { background: #2a2a2a; }
+  .value-cell img { width: 24px; height: 24px; vertical-align: middle; margin: 0 2px; }
+  .value-sub { color: #888; font-size: 11px; margin-top: 2px; }
+  .swap { color: #777; margin: 0 4px; }
+  .pos { color: #7ee787; }
+  .neg { color: #ff6b6b; }
+  .vol { text-align: right; }
+  .empty { color: #888; padding: 40px; text-align: center; }
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #888;
+             border-top-color: transparent; border-radius: 50%;
+             animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .status-line { color: #c8aa6e; font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<!-- JSX 源码：由下方加载器用 classic 运行时编译后执行（babel-standalone 默认的
+     automatic 运行时会生成 import 语句，在普通 script 中无法执行） -->
+<script type="text/x-jsx" id="app-src">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+
+function fmtNum(n, digits = 2) {
+  if (n === null || n === undefined) return "-";
+  const v = Number(n);
+  return Number.isInteger(v) ? String(v) : v.toFixed(digits);
+}
+
+function api(path, options) {
+  return fetch(path, options).then(r => {
+    if (!r.ok) return r.json().then(j => { throw new Error(j.detail || r.statusText); });
+    return r.json();
+  });
+}
+
+// 迷你走势 SVG：用库存的 path d 原样重绘
+function Sparkline({ d, color }) {
+  if (!d) return <span style={{color: "#666"}}>-</span>;
+  return (
+    <svg width="60" height="22" style={{verticalAlign: "middle", marginRight: 6}}>
+      <path d={d} fill="none" stroke={color === "green" ? "#7ee787" : "#ff6b6b"} strokeWidth="2" />
+    </svg>
+  );
+}
+
+// 24h Value 单元格：重现「2 神聖 ⇄ 1 物品」
+function ValueCell({ item, refIcons }) {
+  const refIcon = item.ref_currency && refIcons[item.ref_currency];
+  const refName = {divine: "神聖", chaos: "混沌", exalted: "崇高"}[item.ref_currency] || item.ref_currency;
+  return (
+    <div>
+      <div className="value-cell">
+        {fmtNum(item.ref_amount)}
+        {refIcon ? <img src={refIcon} title={refName}/> : <span> {refName} </span>}
+        <span className="swap">⇄</span>
+        {fmtNum(item.item_amount)}
+        {item.icon_path ? <img src={item.icon_path}/> : null}
+      </div>
+      {item.price_chaos !== null && item.price_chaos !== undefined &&
+        <div className="value-sub">≈ {fmtNum(item.price_chaos)} 混沌</div>}
+    </div>
+  );
+}
+
+function EcoTable({ items, refIcons, search, sort, onSort }) {
+  const kw = search.trim().toLowerCase();
+  let rows = items.filter(it =>
+    !kw || (it.name_zh || "").toLowerCase().includes(kw) ||
+           (it.name_en || "").toLowerCase().includes(kw));
+  const keyFn = {
+    price: it => it.price_divine !== null && it.price_divine !== undefined ? it.price_divine : it.price_chaos,
+    change: it => it.change_7d_pct,
+    volume: it => it.volume_24h,
+  }[sort.key];
+  if (keyFn) {
+    rows = rows.slice().sort((a, b) => {
+      const va = keyFn(a), vb = keyFn(b);
+      if (va === null || va === undefined) return 1;
+      if (vb === null || vb === undefined) return -1;
+      return sort.dir === "asc" ? va - vb : vb - va;
+    });
+  }
+  const arrow = k => sort.key === k ? (sort.dir === "asc" ? " ▲" : " ▼") : "";
+  return (
+    <table className="eco">
+      <thead>
+        <tr>
+          <th>名稱</th>
+          <th className="sortable" onClick={() => onSort("price")}>24h Value{arrow("price")}</th>
+          <th className="sortable" onClick={() => onSort("change")}>Last 7 days{arrow("change")}</th>
+          <th className="sortable" style={{textAlign: "right"}} onClick={() => onSort("volume")}>
+            24h volume traded{arrow("volume")}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map(it => (
+          <tr key={it.slug}>
+            <td>
+              <div className="name-cell">
+                <div className="name-main">
+                  {it.icon_path && <img src={it.icon_path} alt=""/>}
+                  <div>
+                    <div className="name-zh">{it.name_zh}</div>
+                    {it.name_en && <div className="name-en">{it.name_en}</div>}
+                  </div>
+                </div>
+                {it.wiki_slug &&
+                  <a className="wiki-link" target="_blank" rel="noreferrer"
+                     href={"https://poe2db.tw/tw/" + it.wiki_slug}>Wiki</a>}
+              </div>
+            </td>
+            <td><ValueCell item={it} refIcons={refIcons}/></td>
+            <td>
+              <Sparkline d={it.sparkline_d} color={it.change_color}/>
+              {it.change_7d_pct !== null && it.change_7d_pct !== undefined &&
+                <span className={it.change_color === "green" ? "pos" : "neg"}>
+                  {it.change_7d_pct > 0 ? "+" : ""}{fmtNum(it.change_7d_pct, 0)}%
+                </span>}
+            </td>
+            <td className="vol">{it.volume_24h !== null && it.volume_24h !== undefined ? it.volume_24h : "-"}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+// 定时抓取配置面板
+function SchedulePanel({ schedule, onSave }) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState(schedule);
+  const [msg, setMsg] = useState("");
+  useEffect(() => setForm(schedule), [schedule]);
+  if (!form) return null;
+  const save = () => {
+    api("/api/schedule", {method: "PUT", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(form)})
+      .then(cfg => { onSave(cfg); setMsg("已保存"); setTimeout(() => setMsg(""), 2000); })
+      .catch(e => setMsg("保存失败：" + e.message));
+  };
+  return (
+    <div className="panel">
+      <div className="panel-title" onClick={() => setOpen(!open)}>
+        定时抓取配置 {open ? "▾" : "▸"}
+      </div>
+      {open && <div>
+        <div className="row">
+          <label><input type="checkbox" checked={form.enabled}
+            onChange={e => setForm({...form, enabled: e.target.checked})}/> 启用定时抓取</label>
+        </div>
+        <div className="row">
+          <span>开服 ≤</span>
+          <input type="number" style={{width: 60}} value={form.switch_days}
+            onChange={e => setForm({...form, switch_days: Number(e.target.value)})}/>
+          <span>天：每天</span>
+          <input type="time" value={form.daily_time}
+            onChange={e => setForm({...form, daily_time: e.target.value})}/>
+          <span>抓取；之后每周</span>
+          <select value={form.weekly_day}
+            onChange={e => setForm({...form, weekly_day: Number(e.target.value)})}>
+            {WEEKDAYS.map((w, i) => <option key={i} value={i}>{w}</option>)}
+          </select>
+          <input type="time" value={form.weekly_time}
+            onChange={e => setForm({...form, weekly_time: e.target.value})}/>
+          <span>抓取</span>
+          <button onClick={save}>保存</button>
+          <span className="status-line">{msg}</span>
+        </div>
+      </div>}
+    </div>
+  );
+}
+
+// 赛季管理面板
+function SeasonPanel({ onCreated }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [msg, setMsg] = useState("");
+  const submit = () => {
+    if (!name || !startDate) { setMsg("请填写赛季名称与开服日期"); return; }
+    api("/api/seasons", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({name, start_date: startDate})})
+      .then(s => { setMsg("已新增"); setName(""); onCreated(s); })
+      .catch(e => setMsg("失败：" + e.message));
+  };
+  return (
+    <div className="panel">
+      <div className="panel-title" onClick={() => setOpen(!open)}>
+        赛季管理 {open ? "▾" : "▸"}
+      </div>
+      {open && <div className="row">
+        <input type="text" placeholder="赛季名称，如 0.5.5闪回" value={name}
+          onChange={e => setName(e.target.value)}/>
+        <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}/>
+        <button onClick={submit}>新增赛季</button>
+        <span className="status-line">{msg}</span>
+      </div>}
+    </div>
+  );
+}
+
+function App() {
+  const [seasons, setSeasons] = useState([]);
+  const [seasonId, setSeasonId] = useState(null);
+  const [modules, setModules] = useState([]);
+  const [moduleSlug, setModuleSlug] = useState("Economy_Currency");
+  const [data, setData] = useState(null);
+  const [days, setDays] = useState([]);
+  const [day, setDay] = useState(null);       // null = 最新
+  const [meta, setMeta] = useState(null);
+  const [schedule, setSchedule] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [statusText, setStatusText] = useState("");
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState({key: null, dir: "desc"});
+  const pollRef = useRef(null);
+
+  const loadMeta = () => api("/api/meta").then(setMeta).catch(() => {});
+
+  useEffect(() => {
+    api("/api/seasons").then(list => {
+      setSeasons(list);
+      if (list.length) setSeasonId(list[0].id);  // 默认当前赛季（start_date 最新者）
+    }).catch(() => {});
+    api("/api/modules").then(setModules).catch(() => {});
+    api("/api/schedule").then(setSchedule).catch(() => {});
+    loadMeta();
+  }, []);
+
+  const loadEconomy = useCallback((sid, slug, d) => {
+    if (!sid) { setData(null); return; }
+    let url = "/api/economy/" + slug + "?season_id=" + sid;
+    if (d !== null && d !== undefined) url += "&day=" + d;
+    api(url).then(setData).catch(() => setData(null));
+  }, []);
+
+  const loadDays = useCallback((sid, slug) => {
+    if (!sid) { setDays([]); return; }
+    api("/api/economy/" + slug + "/days?season_id=" + sid)
+      .then(j => setDays(j.days)).catch(() => setDays([]));
+  }, []);
+
+  useEffect(() => {
+    setDay(null);
+    loadDays(seasonId, moduleSlug);
+    loadEconomy(seasonId, moduleSlug, null);
+  }, [seasonId, moduleSlug]);
+
+  // 轮询刷新状态
+  const pollStatus = () => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(() => {
+      api("/api/refresh_status").then(st => {
+        if (st.running) {
+          setStatusText("刷新中：" + (st.current_module || "") + " (" + st.done + "/" + st.total + ")");
+        } else {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+          setRefreshing(false);
+          setStatusText(st.error ? "刷新失败：" + st.error : "刷新完成");
+          loadDays(seasonId, moduleSlug);
+          loadEconomy(seasonId, moduleSlug, day);
+          loadMeta();
+          setTimeout(() => setStatusText(""), 4000);
+        }
+      }).catch(() => {});
+    }, 1000);
+  };
+
+  const doRefresh = () => {
+    setRefreshing(true);
+    setStatusText("启动刷新…");
+    api("/api/refresh/" + moduleSlug, {method: "POST"})
+      .then(() => pollStatus())
+      .catch(e => { setRefreshing(false); setStatusText("刷新失败：" + e.message); });
+  };
+
+  const onSort = key => setSort(s => ({
+    key, dir: s.key === key && s.dir === "desc" ? "asc" : "desc",
+  }));
+
+  const season = seasons.find(s => s.id === seasonId);
+  const curModule = modules.find(m => m.slug === moduleSlug);
+
+  return (
+    <div>
+      <div className="topnav">
+        <div className="item active">经济</div>
+        <div className="item disabled" title="暂未开放">策略</div>
+        <div className="item disabled" title="暂未开放">做装</div>
+        <div className="item disabled" title="暂未开放">开荒</div>
+      </div>
+      <div className="layout">
+        <div className="sidebar">
+          <div className="half seasons">
+            <h4>赛季</h4>
+            {seasons.length === 0 && <div className="side-item" style={{color: "#666"}}>尚未录入赛季</div>}
+            {seasons.map(s => (
+              <div key={s.id} className={"side-item" + (s.id === seasonId ? " active" : "")}
+                   onClick={() => setSeasonId(s.id)}>{s.name}</div>
+            ))}
+          </div>
+          <div className="half">
+            <h4>经济模块</h4>
+            {modules.map(m => (
+              <div key={m.slug} className={"side-item" + (m.slug === moduleSlug ? " active" : "")}
+                   onClick={() => setModuleSlug(m.slug)}>
+                {m.icon_path && <img src={m.icon_path} alt=""/>}
+                <span>{m.name_zh}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="main">
+          <h2>{curModule ? curModule.name_zh : moduleSlug}</h2>
+          <div className="meta-line">
+            {season ? (
+              <span>赛季：{season.name} ｜ 开服：{season.start_date} ｜
+                今天是开服第 {data ? data.today_day : "-"} 天
+                {data && data.day ? " ｜ 当前查看：第 " + data.day + " 天" : ""}
+                {data && data.fetched_at ? " ｜ 抓取时间：" + data.fetched_at : ""}
+              </span>
+            ) : <span>请先在「赛季管理」中新增赛季</span>}
+            {meta && meta.chaos_per_divine &&
+              <span> ｜ 汇率：1 神聖 ≈ {fmtNum(meta.chaos_per_divine, 1)} 混沌</span>}
+          </div>
+          <div className="toolbar">
+            <span>开服天数：</span>
+            <select value={day === null ? "" : day}
+              onChange={e => {
+                const v = e.target.value === "" ? null : Number(e.target.value);
+                setDay(v);
+                loadEconomy(seasonId, moduleSlug, v);
+              }}>
+              <option value="">最新</option>
+              {days.map(d => <option key={d} value={d}>第 {d} 天</option>)}
+            </select>
+            <input type="text" placeholder="搜索物品名（中/英文）" value={search}
+              onChange={e => setSearch(e.target.value)} style={{width: 200}}/>
+            <button className="primary" disabled={refreshing || !season} onClick={doRefresh}>
+              {refreshing && <span className="spinner"></span>}刷新本模块
+            </button>
+            <span className="status-line">{statusText}</span>
+          </div>
+          <SchedulePanel schedule={schedule} onSave={setSchedule}/>
+          <SeasonPanel onCreated={s => {
+            api("/api/seasons").then(list => { setSeasons(list); setSeasonId(s.id); });
+          }}/>
+          {data && data.items && data.items.length > 0 ?
+            <EcoTable items={data.items} refIcons={data.ref_icons || {}}
+                      search={search} sort={sort} onSort={onSort}/> :
+            <div className="empty">暂无数据，请点击刷新本模块抓取</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+<script>
+// 用 classic 运行时编译上面的 JSX 并以普通脚本执行
+(function () {
+  var src = document.getElementById("app-src").textContent;
+  var code = Babel.transform(src, { presets: [["react", { runtime: "classic" }]] }).code;
+  var s = document.createElement("script");
+  s.textContent = code;
+  document.body.appendChild(s);
+})();
+</script>
+</body>
+</html>
