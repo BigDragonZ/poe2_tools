@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import db, scraper, scheduler
+from . import db, scraper, scheduler, trading
 from .service import get_refresh_status, start_refresh
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -184,6 +184,78 @@ def api_put_schedule(body: ScheduleIn):
                                    body.weekly_time, body.switch_days)
     scheduler.reschedule()
     return scheduler.get_schedule_config()
+
+
+# ---------- 交易助手 ----------
+
+class TradeRateIn(BaseModel):
+    from_unit: str
+    to_unit: str
+    amount_from: float
+    amount_to: float
+
+
+def _valid_unit(unit):
+    if unit in trading.BASE_CURRENCIES:
+        return True
+    return trading.is_item_unit(unit) and len(unit) > len(trading.ITEM_PREFIX)
+
+
+def _trade_unit_icons(latest):
+    """基础通货按 slug、物品按中文名查本地图标，返回 {unit: icon_path}。"""
+    icons = db.get_item_icons_by_slugs(trading.BASE_CURRENCIES)
+    item_names = sorted({
+        u[len(trading.ITEM_PREFIX):]
+        for r in latest for u in (r["from_unit"], r["to_unit"])
+        if trading.is_item_unit(u)
+    })
+    for name, path in db.get_item_icons_by_names(item_names).items():
+        icons[trading.item_unit(name)] = path
+    return icons
+
+
+@app.get("/api/trade/state")
+def api_trade_state():
+    """交易页全量状态：最新汇率、历史、最优兑换方案、套利环。"""
+    latest = db.latest_trade_rates()
+    best = {}
+    for src in trading.BASE_CURRENCIES:
+        for dst in trading.BASE_CURRENCIES:
+            if src == dst:
+                continue
+            rate, path = trading.best_conversion(latest, src, dst)
+            if rate is not None:
+                best[src + ">" + dst] = {"rate": rate, "path": path}
+    return {
+        "base_currencies": [{"unit": u, "label": trading.BASE_LABELS[u]}
+                            for u in trading.BASE_CURRENCIES],
+        "latest": latest,
+        "history": db.list_trade_rates(30),
+        "best": best,
+        "cycles": trading.find_profitable_cycles(latest),
+        "unit_icons": _trade_unit_icons(latest),
+        "known_items": db.list_item_names(),
+    }
+
+
+@app.post("/api/trade/rates", status_code=201)
+def api_add_trade_rate(body: TradeRateIn):
+    if not (_valid_unit(body.from_unit) and _valid_unit(body.to_unit)):
+        raise HTTPException(400, "无效的兑换单位")
+    if body.from_unit == body.to_unit:
+        raise HTTPException(400, "兑换双方不能相同")
+    if body.amount_from <= 0 or body.amount_to <= 0:
+        raise HTTPException(400, "数量必须为正数")
+    rate_id = db.add_trade_rate(body.from_unit, body.to_unit,
+                                body.amount_from, body.amount_to)
+    return {"id": rate_id}
+
+
+@app.delete("/api/trade/rates/{rate_id}")
+def api_delete_trade_rate(rate_id: int):
+    if not db.delete_trade_rate(rate_id):
+        raise HTTPException(404, "汇率记录不存在")
+    return {"ok": True}
 
 
 # ---------- 元信息 ----------

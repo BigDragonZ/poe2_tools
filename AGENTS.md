@@ -12,22 +12,23 @@
 
 ### 1.1 当前阶段
 
-已完成项目骨架、tkinter 主界面（四个模块标签页）、背包整理模块（已人工验证）与战斗巡航模块（含单元测试，待人工验证）。地图与装备模块为纯占位，暂不开发。
+桌面端功能（战斗宏 + 背包整理）因 Python 键鼠模拟在 POE2 中适配性一般，已参考 D3KeyHelper 用 AutoHotkey v2 重构（`ahk/poe2_key_helper.ahk`，已完成开发，待游戏内人工验证）。Python tkinter 版（背包整理已人工验证、战斗未验证）保留备用；地图与装备模块为纯占位，暂不开发。
 
 ### 1.2 主界面模块
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| 背包整理 | 界面完成 | 坐标定位复用 poe1 代码（直接复制 `poe1_tools/poe_tools/` 再适配） |
-| 战斗 | 界面完成 | 按键功能复用 poe1 代码 |
+| AHK 按键助手 | 待人工验证 | 战斗宏 + 旋风(数字检测触发) + 背包整理 + 货币坐标 + 石碑/地图速点（ahk/ 目录，新桌面端） |
+| 背包整理（Python） | 已验证，备用 | 坐标定位复用 poe1 代码 |
+| 战斗（Python） | 备用 | 按键功能复用 poe1 代码 |
 | 地图 | 占位 | 暂不开发 |
 | 装备 | 占位 | 暂不开发 |
 
 ### 1.3 已确认的设计决策
 
 - POE2 坐标体系与 POE1 一致，沿用两点标定 + CellSize 网格推导
-- 纯 Python 实现，不保留 AHK 备用层
-- GUI 暂用 tkinter，功能丰富后迁移 Qt
+- **桌面端改用 AutoHotkey v2 开发**（2026-09-30 变更，原为纯 Python；Python 版保留备用，不再继续投入）
+- **所有批量操作必须提供执行间隔配置**（2026-09-30 确认；间隔带随机抖动，保留人工操作痕迹）
 - 代码复用方式：复制后独立适配，不抽公共包
 
 ---
@@ -35,10 +36,11 @@
 ## 2. 技术栈与运行环境
 
 - **运行环境**：Windows 11 原生环境（禁止依赖 WSL）
-- **语言**：Python 3.11+，使用 [uv](https://docs.astral.sh/uv/) 管理环境与依赖
-- **GUI**：tkinter / ttk（标准库）
-- **输入模拟**：`pydirectinput`（键鼠模拟）、`keyboard`（全局热键）、`mouse`（读取坐标）
-- **测试**：pytest（纯逻辑单元测试）+ 游戏内人工验证
+- **桌面端**：AutoHotkey v2（本机 2.0.26，安装于 `C:\Program Files\AutoHotkey\v2`）
+- **语言**：Python 3.11+，使用 [uv](https://docs.astral.sh/uv/) 管理环境与依赖（Web 应用与旧版桌面工具）
+- **GUI**：AHK 原生 GUI（桌面端）/ tkinter（Python 旧版备用）
+- **输入模拟**：AHK `SendEvent` + `Click`（桌面端）；`pydirectinput`、`keyboard`、`mouse`（Python 备用）
+- **测试**：AHK `/validate` 语法校验 + pytest（纯逻辑单元测试）+ 游戏内人工验证
 
 ### 架构约束
 
@@ -52,8 +54,11 @@
 
 ```
 D:/game/poe2_tools/
-├── main.py                 # 入口
-├── poe2_tools/             # Python 功能包
+├── main.py                 # Python 旧版桌面端入口（备用）
+├── ahk/                    # AHK 按键助手（新桌面端，AutoHotkey v2）
+│   ├── poe2_key_helper.ahk # 战斗宏 + 背包存仓 + 货币坐标管理 + 石碑速点 + 配置 GUI
+│   └── poe2_key_helper.ini # AHK 端配置（UTF-8，运行时生成）
+├── poe2_tools/             # Python 功能包（旧版桌面端，备用）
 │   ├── common.py           # 共享基础：ini 读写（UTF-8）、POE2 窗口检测、任务状态、按键释放
 │   ├── bag.py              # 背包整理：标定、网格计算、一键存仓
 │   ├── combat.py           # 战斗巡航：多按键连点/按住、失焦自动停止
@@ -69,6 +74,7 @@ D:/game/poe2_tools/
 │   ├── db.py               # SQLite schema 与读写（写操作全局锁串行化）
 │   ├── icons.py            # 图标下载缓存到本地
 │   ├── service.py          # 刷新任务编排与进度（手动单模块/全量）
+│   ├── trading.py          # 交易助手纯逻辑：汇率图、最优兑换路径、套利环检测
 │   ├── scheduler.py        # APScheduler 定时抓取（开服前 2 周每天抓，之后每周抓，可配置）
 │   ├── static/             # index.html（React 18 CDN 单页）+ icons/（图标缓存，不入库）
 │   └── data/               # economy.db（不入库）
@@ -85,17 +91,19 @@ D:/game/poe2_tools/
 ### 命名与注释
 
 - 注释与用户可见文案使用中文
-- 常量全大写下划线，函数 `snake_case`，类 `PascalCase`
-- 新功能优先加入 `poe2_tools/` 包，`main.py` 保持薄壳
+- Python：常量全大写下划线，函数 `snake_case`，类 `PascalCase`；AHK：常量全大写下划线，函数 `PascalCase`，全局状态 `g_` 前缀
+- 桌面端新功能加入 `ahk/`；Python 侧新功能加入 `poe2_tools/` 包，`main.py` 保持薄壳
 
 ---
 
 ## 4. 构建、运行与测试
 
 1. 首次运行前执行 `uv sync` 安装依赖
-2. `uv run python main.py` 启动主界面
-3. `uv run python -m web.app` 启动经济记录 Web 应用（http://127.0.0.1:8321 ）
-4. `uv run pytest` 运行单元测试
+2. 双击 `ahk/poe2_key_helper.ahk` 启动 AHK 按键助手（新桌面端，需 AutoHotkey v2）
+3. `uv run python main.py` 启动 Python 旧版主界面（备用）
+4. `uv run python -m web.app` 启动经济记录 Web 应用（http://127.0.0.1:8321 ）
+5. `uv run pytest` 运行单元测试
+6. AHK 语法校验：Git Bash 中需双斜杠防止路径转换：`"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe" //ErrorStdOut //validate ahk/poe2_key_helper.ahk`
 
 ### 验证策略
 

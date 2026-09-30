@@ -62,6 +62,14 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT
 );
+CREATE TABLE IF NOT EXISTS trade_rates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_unit TEXT NOT NULL,
+    to_unit TEXT NOT NULL,
+    amount_from REAL NOT NULL,
+    amount_to REAL NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 # 写操作全局锁，保证 SQLite 写串行化
@@ -291,6 +299,70 @@ def latest_fetch_time_by_module(db_path=None):
                GROUP BY module_slug"""
         ).fetchall()
         return {r["module_slug"]: r["t"] for r in rows}
+
+
+# ---------- 交易汇率 ----------
+
+def add_trade_rate(from_unit, to_unit, amount_from, amount_to, db_path=None):
+    """录入一条手动观测的兑换比例（from_unit * amount_from = to_unit * amount_to）。"""
+    with _DB_LOCK, _connect(db_path) as conn:
+        cur = conn.execute(
+            "INSERT INTO trade_rates(from_unit, to_unit, amount_from, amount_to, created_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (from_unit, to_unit, amount_from, amount_to, _now()),
+        )
+        return cur.lastrowid
+
+
+def list_trade_rates(limit=50, db_path=None):
+    """最近的汇率记录（新→旧）。"""
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM trade_rates ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def latest_trade_rates(db_path=None):
+    """每个 (from_unit, to_unit) 方向最新一条汇率。"""
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            """SELECT t.* FROM trade_rates t
+               WHERE t.id = (
+                   SELECT MAX(t2.id) FROM trade_rates t2
+                   WHERE t2.from_unit = t.from_unit AND t2.to_unit = t.to_unit)
+               ORDER BY t.id DESC"""
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def delete_trade_rate(rate_id, db_path=None):
+    with _DB_LOCK, _connect(db_path) as conn:
+        cur = conn.execute("DELETE FROM trade_rates WHERE id = ?", (rate_id,))
+        return cur.rowcount > 0
+
+
+def list_item_names(limit=500, db_path=None):
+    """已知物品名（供交易页物品输入联想）。"""
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT name_zh FROM items ORDER BY name_zh LIMIT ?", (limit,)
+        ).fetchall()
+        return [r["name_zh"] for r in rows]
+
+
+def get_item_icons_by_names(names, db_path=None):
+    """按物品中文名查本地图标路径，返回 {name_zh: icon_path}。"""
+    if not names:
+        return {}
+    placeholders = ",".join("?" for _ in names)
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            f"SELECT name_zh, icon_path FROM items WHERE name_zh IN ({placeholders}) "
+            "AND icon_path IS NOT NULL GROUP BY name_zh",
+            list(names),
+        ).fetchall()
+        return {r["name_zh"]: r["icon_path"] for r in rows}
 
 
 # ---------- 设置 ----------
