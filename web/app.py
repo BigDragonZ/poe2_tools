@@ -193,6 +193,13 @@ class TradeRateIn(BaseModel):
     to_unit: str
     amount_from: float
     amount_to: float
+    side: str = "sell"  # buy = 市场买入（付金币），sell = 卖出（免金币）
+
+
+class GoldValuesIn(BaseModel):
+    exalted: float | None = None
+    chaos: float | None = None
+    divine: float | None = None
 
 
 def _valid_unit(unit):
@@ -214,16 +221,36 @@ def _trade_unit_icons(latest):
     return icons
 
 
+def _gold_values():
+    """各通货 Currency Exchange 值（金币/个）：手动覆盖优先，否则取信息库抓取值。
+
+    返回 {unit: {"value": float|None, "source": "manual"|"library"|None}}。
+    """
+    library = db.get_gold_costs_by_slugs(trading.BASE_CURRENCIES)
+    result = {}
+    for u in trading.BASE_CURRENCIES:
+        raw = db.get_setting("trade_gold_value:" + u)
+        if raw:
+            result[u] = {"value": float(raw), "source": "manual"}
+        elif library.get(u):
+            result[u] = {"value": library[u], "source": "library"}
+        else:
+            result[u] = {"value": None, "source": None}
+    return result
+
+
 @app.get("/api/trade/state")
 def api_trade_state():
-    """交易页全量状态：最新汇率、历史、最优兑换方案、套利环。"""
+    """交易页全量状态：最新汇率、历史、最优方案、套利环、金币转化比例。"""
     latest = db.latest_trade_rates()
+    gold_values = _gold_values()
+    gv = {u: g["value"] for u, g in gold_values.items() if g["value"]}
     best = {}
     for src in trading.BASE_CURRENCIES:
         for dst in trading.BASE_CURRENCIES:
             if src == dst:
                 continue
-            rate, path = trading.best_conversion(latest, src, dst)
+            rate, path = trading.best_conversion(latest, src, dst, gv)
             if rate is not None:
                 best[src + ">" + dst] = {"rate": rate, "path": path}
     return {
@@ -232,7 +259,9 @@ def api_trade_state():
         "latest": latest,
         "history": db.list_trade_rates(30),
         "best": best,
-        "cycles": trading.find_profitable_cycles(latest),
+        "cycles": trading.find_profitable_cycles(latest, gv),
+        "gold_values": gold_values,
+        "gold_conversion": trading.gold_conversion(latest, gv),
         "unit_icons": _trade_unit_icons(latest),
         "known_items": db.list_item_names(),
     }
@@ -246,8 +275,10 @@ def api_add_trade_rate(body: TradeRateIn):
         raise HTTPException(400, "兑换双方不能相同")
     if body.amount_from <= 0 or body.amount_to <= 0:
         raise HTTPException(400, "数量必须为正数")
+    if body.side not in ("buy", "sell"):
+        raise HTTPException(400, "side 取值 buy|sell")
     rate_id = db.add_trade_rate(body.from_unit, body.to_unit,
-                                body.amount_from, body.amount_to)
+                                body.amount_from, body.amount_to, body.side)
     return {"id": rate_id}
 
 
@@ -256,6 +287,15 @@ def api_delete_trade_rate(rate_id: int):
     if not db.delete_trade_rate(rate_id):
         raise HTTPException(404, "汇率记录不存在")
     return {"ok": True}
+
+
+@app.put("/api/trade/gold_values")
+def api_put_gold_values(body: GoldValuesIn):
+    """手动设置/清除通货的 Currency Exchange 值（金币/个）。None 或 <=0 = 清除手动覆盖。"""
+    for u in trading.BASE_CURRENCIES:
+        v = getattr(body, u)
+        db.set_setting("trade_gold_value:" + u, str(v) if v and v > 0 else "")
+    return _gold_values()
 
 
 # ---------- 元信息 ----------

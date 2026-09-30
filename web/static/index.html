@@ -307,56 +307,150 @@ function PathView({ path, icons }) {
           <span style={{color: "#777", fontSize: 11}}>
             {" (1:" + fmtNum(e.amount_to / e.amount_from, 3) + ")"}
           </span>
+          {e.side === "buy" &&
+            <span style={{color: "#c8aa6e", fontSize: 11}} title="市场买入，已折算金币费"> [买]</span>}
         </span>
       ))}
     </span>
   );
 }
 
-// 三通货单行录入：N from ＝ M to（方向固定，不用下拉框）
-function PairRateRow({ from, to, icons, reload }) {
+// 通货 Currency Exchange 值（金币/个）：手动覆盖优先，否则用信息库抓取值
+function GoldValueForm({ state, reload }) {
+  const [form, setForm] = useState(null);
+  const [msg, setMsg] = useState("");
+  useEffect(() => {
+    const f = {};
+    BASE_CURS.forEach(c => {
+      const g = (state.gold_values || {})[c.unit] || {};
+      f[c.unit] = g.value !== null && g.value !== undefined ? String(g.value) : "";
+    });
+    setForm(f);
+  }, [state.gold_values]);
+  if (!form) return null;
+  const save = () => {
+    const body = {};
+    BASE_CURS.forEach(c => { body[c.unit] = Number(form[c.unit]) || null; });
+    api("/api/trade/gold_values", {method: "PUT", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body)})
+      .then(() => { setMsg("已保存"); reload(); setTimeout(() => setMsg(""), 1500); })
+      .catch(e => setMsg("保存失败：" + e.message));
+  };
+  return (
+    <div className="row">
+      <span style={{color: "#999"}}>Currency Exchange 值（金币/个）：</span>
+      {BASE_CURS.map(c => {
+        const g = (state.gold_values || {})[c.unit] || {};
+        return (
+          <span key={c.unit}>
+            <UnitIcon unit={c.unit} icons={state.unit_icons}/> {c.label}
+            <input type="number" style={{width: 80, margin: "0 4px"}} min="0" step="any"
+              value={form[c.unit]}
+              onChange={e => setForm({...form, [c.unit]: e.target.value})}/>
+            {g.source === "library" && <span style={{color: "#777", fontSize: 11}}>(信息库)</span>}
+          </span>
+        );
+      })}
+      <button onClick={save}>保存</button>
+      <span className="status-line">{msg}</span>
+    </div>
+  );
+}
+
+// 市场单行录入：side=buy（付金币）/ sell（免金币），方向固定平铺
+function MarketRateRow({ side, from, to, gv, icons, reload }) {
   const [af, setAf] = useState("1");
   const [at, setAt] = useState("");
   const [msg, setMsg] = useState("");
+  const ve = gv && gv[to];
+  const fee = side === "buy" && Number(at) > 0 && ve > 0 ? Number(at) * ve : null;
   const submit = () => {
     const a = Number(af), b = Number(at);
     if (!(a > 0) || !(b > 0)) { setMsg("数量必须为正数"); return; }
     api("/api/trade/rates", {method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({from_unit: from, to_unit: to, amount_from: a, amount_to: b})})
+      body: JSON.stringify({from_unit: from, to_unit: to, amount_from: a, amount_to: b, side})})
       .then(() => { setAt(""); setMsg("已录入"); reload(); setTimeout(() => setMsg(""), 1500); })
       .catch(e => setMsg("失败：" + e.message));
   };
+  const label = side === "buy"
+    ? "用" + unitLabel(from) + "买" + unitLabel(to)
+    : "卖" + unitLabel(from) + "得" + unitLabel(to);
   return (
     <div className="row">
+      <span style={{width: 150, color: "#999", flex: "none"}}>{label}：</span>
       <input type="number" style={{width: 70}} min="0" step="any" value={af}
         onChange={e => setAf(e.target.value)}/>
       <span><UnitIcon unit={from} icons={icons}/> {unitLabel(from)} ＝</span>
       <input type="number" style={{width: 90}} min="0" step="any" placeholder="数量" value={at}
         onChange={e => setAt(e.target.value)}/>
       <span><UnitIcon unit={to} icons={icons}/> {unitLabel(to)}</span>
+      {side === "buy" &&
+        <span style={{color: "#c8aa6e", fontSize: 12}}>
+          （金币 {fee !== null ? fmtNum(fee, 0) : "？"}）
+        </span>}
       <button onClick={submit}>录入</button>
       <span className="status-line">{msg}</span>
     </div>
   );
 }
 
-// 第一部分：三通货互换比例（6 个方向全部平铺）+ 最新比例
+// 金币 ⇄ 通货转化比例（由 VE + 最优路径推导）
+function GoldConvTable({ state }) {
+  const rows = state.gold_conversion || [];
+  if (!rows.some(r => r.gold_per_unit)) return null;
+  return (
+    <table className="eco" style={{marginTop: 10}}>
+      <thead>
+        <tr><th>通货</th><th>1 通货 ＝ 金币</th><th>1 金币 ＝ 通货</th><th>1 金币 ≈ 混沌（最优路径）</th></tr>
+      </thead>
+      <tbody>
+        {rows.map(r => (
+          <tr key={r.unit}>
+            <td><UnitIcon unit={r.unit} icons={state.unit_icons}/> {unitLabel(r.unit)}</td>
+            <td>{r.gold_per_unit ? fmtNum(r.gold_per_unit, 0) + " 金币" : "-"}</td>
+            <td>{r.unit_per_gold ? fmtNum(r.unit_per_gold, 6) + " " + unitLabel(r.unit) : "-"}</td>
+            <td>{r.chaos_per_gold ? fmtNum(r.chaos_per_gold, 6) + " 混沌石" : "-"}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+// 第一部分：三通货市场比例（买/卖两部分平铺）+ 金币转化 + 最新比例
 function BaseRateSection({ state, reload }) {
-  const dirs = [];
-  BASE_CURS.forEach(a => BASE_CURS.forEach(b => { if (a.unit !== b.unit) dirs.push([a.unit, b.unit]); }));
+  const gv = {};
+  BASE_CURS.forEach(c => {
+    const g = (state.gold_values || {})[c.unit] || {};
+    if (g.value) gv[c.unit] = g.value;
+  });
   const pairs = state.latest.filter(r => !isItemUnit(r.from_unit) && !isItemUnit(r.to_unit));
   return (
     <div className="panel">
-      <div className="panel-title" style={{cursor: "default"}}>三通货互换比例（游戏内观测后手动录入）</div>
-      {dirs.map(([f, t]) => (
-        <PairRateRow key={f + ">" + t} from={f} to={t} icons={state.unit_icons} reload={reload}/>
-      ))}
+      <div className="panel-title" style={{cursor: "default"}}>三通货市场比例（游戏内观测后手动录入）</div>
+      <GoldValueForm state={state} reload={reload}/>
+      <div style={{marginTop: 12, color: "#c8aa6e"}}>
+        买入（需付金币：金币 = 买入数量 × 该通货 Currency Exchange 值）
+      </div>
+      {BASE_CURS.map(b => BASE_CURS.filter(a => a.unit !== b.unit).map(a => (
+        <MarketRateRow key={"buy:" + a.unit + ">" + b.unit} side="buy"
+          from={a.unit} to={b.unit} gv={gv} icons={state.unit_icons} reload={reload}/>
+      )))}
+      <div style={{marginTop: 12, color: "#c8aa6e"}}>卖出（免金币）</div>
+      {BASE_CURS.map(a => BASE_CURS.filter(b => b.unit !== a.unit).map(b => (
+        <MarketRateRow key={"sell:" + a.unit + ">" + b.unit} side="sell"
+          from={a.unit} to={b.unit} gv={gv} icons={state.unit_icons} reload={reload}/>
+      )))}
+      <GoldConvTable state={state}/>
       <table className="eco" style={{marginTop: 10}}>
-        <thead><tr><th>方向</th><th>观测比例</th><th>折合 1 单位</th><th>录入时间</th></tr></thead>
+        <thead><tr><th>类型</th><th>方向</th><th>观测比例</th><th>折合 1 单位</th><th>录入时间</th></tr></thead>
         <tbody>
-          {pairs.length === 0 && <tr><td colSpan="4" style={{color: "#777"}}>尚未录入</td></tr>}
+          {pairs.length === 0 && <tr><td colSpan="5" style={{color: "#777"}}>尚未录入</td></tr>}
           {pairs.map(r => (
             <tr key={r.id}>
+              <td style={{color: r.side === "buy" ? "#c8aa6e" : "#999"}}>
+                {r.side === "buy" ? "买" : "卖"}
+              </td>
               <td>
                 <UnitIcon unit={r.from_unit} icons={state.unit_icons}/> {unitLabel(r.from_unit)}
                 <span className="swap">→</span>
@@ -384,8 +478,8 @@ function ItemPairRow({ name, dir, cur, icons, reload }) {
     if (!n) { setMsg("请先填写物品名称"); return; }
     if (!(i > 0) || !(c > 0)) { setMsg("数量必须为正数"); return; }
     const body = dir === "sell"
-      ? {from_unit: "item:" + n, to_unit: cur, amount_from: i, amount_to: c}
-      : {from_unit: cur, to_unit: "item:" + n, amount_from: c, amount_to: i};
+      ? {from_unit: "item:" + n, to_unit: cur, amount_from: i, amount_to: c, side: "sell"}
+      : {from_unit: cur, to_unit: "item:" + n, amount_from: c, amount_to: i, side: "buy"};
     api("/api/trade/rates", {method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify(body)})
       .then(() => { setCa(""); setMsg("已录入"); reload(); setTimeout(() => setMsg(""), 1500); })
@@ -442,11 +536,14 @@ function ItemRateSection({ state, reload }) {
         </div>
       ))}
       <table className="eco" style={{marginTop: 10}}>
-        <thead><tr><th>方向</th><th>观测比例</th><th>折合 1 单位</th><th>录入时间</th></tr></thead>
+        <thead><tr><th>类型</th><th>方向</th><th>观测比例</th><th>折合 1 单位</th><th>录入时间</th></tr></thead>
         <tbody>
-          {pairs.length === 0 && <tr><td colSpan="4" style={{color: "#777"}}>尚未录入</td></tr>}
+          {pairs.length === 0 && <tr><td colSpan="5" style={{color: "#777"}}>尚未录入</td></tr>}
           {pairs.map(r => (
             <tr key={r.id}>
+              <td style={{color: r.side === "buy" ? "#c8aa6e" : "#999"}}>
+                {r.side === "buy" ? "买" : "卖"}
+              </td>
               <td>
                 <UnitIcon unit={r.from_unit} icons={state.unit_icons}/> {unitLabel(r.from_unit)}
                 <span className="swap">→</span>
@@ -468,7 +565,7 @@ function BestPlanSection({ state }) {
   const keys = Object.keys(state.best);
   return (
     <div className="panel">
-      <div className="panel-title" style={{cursor: "default"}}>最佳兑换方案（按已录入比例计算）</div>
+      <div className="panel-title" style={{cursor: "default"}}>最佳兑换方案（买边已折算金币费）</div>
       {keys.length === 0 && <div style={{color: "#777", marginTop: 8}}>录入比例后自动计算</div>}
       {keys.length > 0 &&
         <table className="eco" style={{marginTop: 10}}>
@@ -520,11 +617,14 @@ function TradeHistory({ state, reload }) {
     <div className="panel">
       <div className="panel-title" style={{cursor: "default"}}>录入历史（最近 {state.history.length} 条）</div>
       <table className="eco" style={{marginTop: 8}}>
-        <thead><tr><th>方向</th><th>比例</th><th>录入时间</th><th></th></tr></thead>
+        <thead><tr><th>类型</th><th>方向</th><th>比例</th><th>录入时间</th><th></th></tr></thead>
         <tbody>
-          {state.history.length === 0 && <tr><td colSpan="4" style={{color: "#777"}}>暂无记录</td></tr>}
+          {state.history.length === 0 && <tr><td colSpan="5" style={{color: "#777"}}>暂无记录</td></tr>}
           {state.history.map(r => (
             <tr key={r.id}>
+              <td style={{color: r.side === "buy" ? "#c8aa6e" : "#999"}}>
+                {r.side === "buy" ? "买" : "卖"}
+              </td>
               <td>{unitLabel(r.from_unit)} → {unitLabel(r.to_unit)}</td>
               <td>{fmtNum(r.amount_from)} : {fmtNum(r.amount_to)}</td>
               <td style={{color: "#888"}}>{r.created_at}</td>

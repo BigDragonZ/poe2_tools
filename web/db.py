@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS trade_rates (
     to_unit TEXT NOT NULL,
     amount_from REAL NOT NULL,
     amount_to REAL NOT NULL,
+    side TEXT NOT NULL DEFAULT 'sell',
     created_at TEXT NOT NULL
 );
 """
@@ -87,9 +88,12 @@ def _connect(db_path=None):
 
 
 def init_db(db_path=None):
-    """建表（幂等）。"""
+    """建表（幂等）；对已存在的库做轻量迁移。"""
     with _DB_LOCK, _connect(db_path) as conn:
         conn.executescript(_SCHEMA)
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(trade_rates)")]
+        if "side" not in cols:
+            conn.execute("ALTER TABLE trade_rates ADD COLUMN side TEXT NOT NULL DEFAULT 'sell'")
 
 
 def _now():
@@ -303,13 +307,16 @@ def latest_fetch_time_by_module(db_path=None):
 
 # ---------- 交易汇率 ----------
 
-def add_trade_rate(from_unit, to_unit, amount_from, amount_to, db_path=None):
-    """录入一条手动观测的兑换比例（from_unit * amount_from = to_unit * amount_to）。"""
+def add_trade_rate(from_unit, to_unit, amount_from, amount_to, side="sell", db_path=None):
+    """录入一条手动观测的兑换比例（from_unit * amount_from = to_unit * amount_to）。
+
+    side：buy = 市场买入（需付金币），sell = 卖出（免金币）。
+    """
     with _DB_LOCK, _connect(db_path) as conn:
         cur = conn.execute(
-            "INSERT INTO trade_rates(from_unit, to_unit, amount_from, amount_to, created_at)"
-            " VALUES (?, ?, ?, ?, ?)",
-            (from_unit, to_unit, amount_from, amount_to, _now()),
+            "INSERT INTO trade_rates(from_unit, to_unit, amount_from, amount_to, side, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (from_unit, to_unit, amount_from, amount_to, side, _now()),
         )
         return cur.lastrowid
 
@@ -324,13 +331,14 @@ def list_trade_rates(limit=50, db_path=None):
 
 
 def latest_trade_rates(db_path=None):
-    """每个 (from_unit, to_unit) 方向最新一条汇率。"""
+    """每个 (from_unit, to_unit, side) 方向最新一条汇率。"""
     with _connect(db_path) as conn:
         rows = conn.execute(
             """SELECT t.* FROM trade_rates t
                WHERE t.id = (
                    SELECT MAX(t2.id) FROM trade_rates t2
-                   WHERE t2.from_unit = t.from_unit AND t2.to_unit = t.to_unit)
+                   WHERE t2.from_unit = t.from_unit AND t2.to_unit = t.to_unit
+                     AND t2.side = t.side)
                ORDER BY t.id DESC"""
         ).fetchall()
         return [dict(r) for r in rows]
@@ -363,6 +371,30 @@ def get_item_icons_by_names(names, db_path=None):
             list(names),
         ).fetchall()
         return {r["name_zh"]: r["icon_path"] for r in rows}
+
+
+def get_gold_costs_by_slugs(slugs, db_path=None):
+    """按物品 slug 查信息库的 Currency Exchange 金币消耗，返回 {slug: gold_cost}。
+
+    item_info 表不存在（信息库功能未建库）时返回空，退化为纯手动模式。
+    """
+    if not slugs:
+        return {}
+    placeholders = ",".join("?" for _ in slugs)
+    with _connect(db_path) as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'item_info'"
+        ).fetchone()
+        if exists is None:
+            return {}
+        rows = conn.execute(
+            f"""SELECT i.slug, info.gold_cost FROM items i
+                JOIN item_info info ON info.item_id = i.id
+                WHERE i.slug IN ({placeholders}) AND info.gold_cost IS NOT NULL
+                GROUP BY i.slug""",
+            list(slugs),
+        ).fetchall()
+        return {r["slug"]: r["gold_cost"] for r in rows}
 
 
 # ---------- 设置 ----------
