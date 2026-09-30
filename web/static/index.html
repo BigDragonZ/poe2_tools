@@ -313,38 +313,44 @@ function PathView({ path, icons }) {
   );
 }
 
-// 第一部分：三通货互换比例录入 + 最新比例
-function BaseRateSection({ state, reload }) {
-  const [form, setForm] = useState({from: "divine", to: "chaos", af: "1", at: ""});
+// 三通货单行录入：N from ＝ M to（方向固定，不用下拉框）
+function PairRateRow({ from, to, icons, reload }) {
+  const [af, setAf] = useState("1");
+  const [at, setAt] = useState("");
   const [msg, setMsg] = useState("");
-  const pairs = state.latest.filter(r => !isItemUnit(r.from_unit) && !isItemUnit(r.to_unit));
   const submit = () => {
-    const af = Number(form.af), at = Number(form.at);
-    if (!(af > 0) || !(at > 0)) { setMsg("数量必须为正数"); return; }
-    if (form.from === form.to) { setMsg("兑换双方不能相同"); return; }
+    const a = Number(af), b = Number(at);
+    if (!(a > 0) || !(b > 0)) { setMsg("数量必须为正数"); return; }
     api("/api/trade/rates", {method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({from_unit: form.from, to_unit: form.to, amount_from: af, amount_to: at})})
-      .then(() => { setMsg("已录入"); setForm({...form, at: ""}); reload(); setTimeout(() => setMsg(""), 2000); })
+      body: JSON.stringify({from_unit: from, to_unit: to, amount_from: a, amount_to: b})})
+      .then(() => { setAt(""); setMsg("已录入"); reload(); setTimeout(() => setMsg(""), 1500); })
       .catch(e => setMsg("失败：" + e.message));
   };
   return (
+    <div className="row">
+      <input type="number" style={{width: 70}} min="0" step="any" value={af}
+        onChange={e => setAf(e.target.value)}/>
+      <span><UnitIcon unit={from} icons={icons}/> {unitLabel(from)} ＝</span>
+      <input type="number" style={{width: 90}} min="0" step="any" placeholder="数量" value={at}
+        onChange={e => setAt(e.target.value)}/>
+      <span><UnitIcon unit={to} icons={icons}/> {unitLabel(to)}</span>
+      <button onClick={submit}>录入</button>
+      <span className="status-line">{msg}</span>
+    </div>
+  );
+}
+
+// 第一部分：三通货互换比例（6 个方向全部平铺）+ 最新比例
+function BaseRateSection({ state, reload }) {
+  const dirs = [];
+  BASE_CURS.forEach(a => BASE_CURS.forEach(b => { if (a.unit !== b.unit) dirs.push([a.unit, b.unit]); }));
+  const pairs = state.latest.filter(r => !isItemUnit(r.from_unit) && !isItemUnit(r.to_unit));
+  return (
     <div className="panel">
       <div className="panel-title" style={{cursor: "default"}}>三通货互换比例（游戏内观测后手动录入）</div>
-      <div className="row">
-        <input type="number" style={{width: 70}} min="0" step="any" value={form.af}
-          onChange={e => setForm({...form, af: e.target.value})}/>
-        <select value={form.from} onChange={e => setForm({...form, from: e.target.value})}>
-          {BASE_CURS.map(c => <option key={c.unit} value={c.unit}>{c.label}</option>)}
-        </select>
-        <span>＝</span>
-        <input type="number" style={{width: 90}} min="0" step="any" placeholder="数量" value={form.at}
-          onChange={e => setForm({...form, at: e.target.value})}/>
-        <select value={form.to} onChange={e => setForm({...form, to: e.target.value})}>
-          {BASE_CURS.map(c => <option key={c.unit} value={c.unit}>{c.label}</option>)}
-        </select>
-        <button onClick={submit}>录入</button>
-        <span className="status-line">{msg}</span>
-      </div>
+      {dirs.map(([f, t]) => (
+        <PairRateRow key={f + ">" + t} from={f} to={t} icons={state.unit_icons} reload={reload}/>
+      ))}
       <table className="eco" style={{marginTop: 10}}>
         <thead><tr><th>方向</th><th>观测比例</th><th>折合 1 单位</th><th>录入时间</th></tr></thead>
         <tbody>
@@ -367,48 +373,74 @@ function BaseRateSection({ state, reload }) {
   );
 }
 
-// 第二部分：物品与三通货的互换比例录入
-function ItemRateSection({ state, reload }) {
-  const [form, setForm] = useState({name: "", dir: "sell", ia: "1", cur: "chaos", ca: ""});
+// 物品单行录入：卖出（物品→通货）或买入（通货→物品），通货固定展示
+function ItemPairRow({ name, dir, cur, icons, reload }) {
+  const [ia, setIa] = useState("1");
+  const [ca, setCa] = useState("");
   const [msg, setMsg] = useState("");
-  const pairs = state.latest.filter(r => isItemUnit(r.from_unit) || isItemUnit(r.to_unit));
   const submit = () => {
-    const name = form.name.trim();
-    const ia = Number(form.ia), ca = Number(form.ca);
-    if (!name) { setMsg("请填写物品名称"); return; }
-    if (!(ia > 0) || !(ca > 0)) { setMsg("数量必须为正数"); return; }
-    const body = form.dir === "sell"
-      ? {from_unit: "item:" + name, to_unit: form.cur, amount_from: ia, amount_to: ca}
-      : {from_unit: form.cur, to_unit: "item:" + name, amount_from: ca, amount_to: ia};
+    const n = name.trim();
+    const i = Number(ia), c = Number(ca);
+    if (!n) { setMsg("请先填写物品名称"); return; }
+    if (!(i > 0) || !(c > 0)) { setMsg("数量必须为正数"); return; }
+    const body = dir === "sell"
+      ? {from_unit: "item:" + n, to_unit: cur, amount_from: i, amount_to: c}
+      : {from_unit: cur, to_unit: "item:" + n, amount_from: c, amount_to: i};
     api("/api/trade/rates", {method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify(body)})
-      .then(() => { setMsg("已录入"); setForm({...form, ca: ""}); reload(); setTimeout(() => setMsg(""), 2000); })
+      .then(() => { setCa(""); setMsg("已录入"); reload(); setTimeout(() => setMsg(""), 1500); })
       .catch(e => setMsg("失败：" + e.message));
   };
+  const label = dir === "sell" ? "卖出换" + unitLabel(cur) : "买入耗" + unitLabel(cur);
+  return (
+    <div className="row">
+      <span style={{width: 96, color: "#999", flex: "none"}}>{label}：</span>
+      {dir === "sell" ? (
+        <span>
+          <input type="number" style={{width: 70}} min="0" step="any" value={ia}
+            onChange={e => setIa(e.target.value)}/>
+          <span> 个 ＝ </span>
+          <input type="number" style={{width: 90}} min="0" step="any" placeholder="数量" value={ca}
+            onChange={e => setCa(e.target.value)}/>
+          <span> <UnitIcon unit={cur} icons={icons}/> {unitLabel(cur)}</span>
+        </span>
+      ) : (
+        <span>
+          <input type="number" style={{width: 90}} min="0" step="any" placeholder="数量" value={ca}
+            onChange={e => setCa(e.target.value)}/>
+          <span> <UnitIcon unit={cur} icons={icons}/> {unitLabel(cur)} ＝ </span>
+          <input type="number" style={{width: 70}} min="0" step="any" value={ia}
+            onChange={e => setIa(e.target.value)}/>
+          <span> 个</span>
+        </span>
+      )}
+      <button onClick={submit}>录入</button>
+      <span className="status-line">{msg}</span>
+    </div>
+  );
+}
+
+// 第二部分：物品与三通货的互换比例（3 通货 × 买卖 2 方向全部平铺）
+function ItemRateSection({ state, reload }) {
+  const [name, setName] = useState("");
+  const pairs = state.latest.filter(r => isItemUnit(r.from_unit) || isItemUnit(r.to_unit));
   return (
     <div className="panel">
       <div className="panel-title" style={{cursor: "default"}}>物品兑换比例（物品 ⇄ 三通货）</div>
       <div className="row">
-        <input type="text" placeholder="物品名称" list="trade-item-names" style={{width: 160}}
-          value={form.name} onChange={e => setForm({...form, name: e.target.value})}/>
+        <span style={{width: 96, color: "#999", flex: "none"}}>物品名称：</span>
+        <input type="text" placeholder="物品名称" list="trade-item-names" style={{width: 200}}
+          value={name} onChange={e => setName(e.target.value)}/>
         <datalist id="trade-item-names">
           {state.known_items.map(n => <option key={n} value={n}/>)}
         </datalist>
-        <select value={form.dir} onChange={e => setForm({...form, dir: e.target.value})}>
-          <option value="sell">卖出物品换通货</option>
-          <option value="buy">用通货买入物品</option>
-        </select>
-        <input type="number" style={{width: 70}} min="0" step="any" value={form.ia}
-          onChange={e => setForm({...form, ia: e.target.value})}/>
-        <span>个物品 ＝</span>
-        <input type="number" style={{width: 90}} min="0" step="any" placeholder="数量" value={form.ca}
-          onChange={e => setForm({...form, ca: e.target.value})}/>
-        <select value={form.cur} onChange={e => setForm({...form, cur: e.target.value})}>
-          {BASE_CURS.map(c => <option key={c.unit} value={c.unit}>{c.label}</option>)}
-        </select>
-        <button onClick={submit}>录入</button>
-        <span className="status-line">{msg}</span>
       </div>
+      {BASE_CURS.map(c => (
+        <div key={c.unit}>
+          <ItemPairRow name={name} dir="sell" cur={c.unit} icons={state.unit_icons} reload={reload}/>
+          <ItemPairRow name={name} dir="buy" cur={c.unit} icons={state.unit_icons} reload={reload}/>
+        </div>
+      ))}
       <table className="eco" style={{marginTop: 10}}>
         <thead><tr><th>方向</th><th>观测比例</th><th>折合 1 单位</th><th>录入时间</th></tr></thead>
         <tbody>
@@ -611,15 +643,11 @@ function App() {
   return (
     <div>
       <div className="topnav">
-        <div className={"item" + (page === "economy" ? " active" : "")}
-             onClick={() => setPage("economy")}>经济</div>
-        <div className={"item" + (page === "trade" ? " active" : "")}
-             onClick={() => setPage("trade")}>交易</div>
+        <div className="item active">经济</div>
         <div className="item disabled" title="暂未开放">策略</div>
         <div className="item disabled" title="暂未开放">做装</div>
         <div className="item disabled" title="暂未开放">开荒</div>
       </div>
-      {page === "trade" ? <TradePage/> :
       <div className="layout">
         <div className="sidebar">
           <div className="half seasons">
@@ -627,10 +655,16 @@ function App() {
             {seasons.length === 0 && <div className="side-item" style={{color: "#666"}}>尚未录入赛季</div>}
             {seasons.map(s => (
               <div key={s.id} className={"side-item" + (s.id === seasonId ? " active" : "")}
-                   onClick={() => setSeasonId(s.id)}>{s.name}</div>
+                   onClick={() => { setSeasonId(s.id); setPage("economy"); }}>{s.name}</div>
             ))}
           </div>
+          <div className="half">
+            <h4>工具</h4>
+            <div className={"side-item" + (page === "trade" ? " active" : "")}
+                 onClick={() => setPage("trade")}>交易助手</div>
+          </div>
         </div>
+        {page === "trade" ? <TradePage/> :
         <div className="main">
           <h2>{curModule ? curModule.name_zh : moduleSlug}</h2>
           <div className="meta-line">
@@ -684,8 +718,8 @@ function App() {
                 <div className="empty">暂无数据，请点击刷新本模块抓取</div>}
             </div>
           </div>
-        </div>
-      </div>}
+        </div>}
+      </div>
     </div>
   );
 }
