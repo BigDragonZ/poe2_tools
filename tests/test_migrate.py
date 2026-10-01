@@ -5,8 +5,8 @@
 from __future__ import annotations
 
 from poe2_tools.config import settings as sm
-from poe2_tools.config.migrate import decode_ahk_ini, migrate_ahk_config
-from poe2_tools.config.settings import Point
+from poe2_tools.config.migrate import decode_ahk_ini, merge_ahk_coords, migrate_ahk_config
+from poe2_tools.config.settings import Point, Settings
 
 
 def _build_ahk_ini() -> bytes:
@@ -86,3 +86,34 @@ def test_migrate_unconfigured_profiles_use_defaults() -> None:
     # 只有配置1 有数据，配置2-4 保持默认
     assert s.profiles[1]["LButton"].mode == sm.MODE_SPAM
     assert s.profiles[1]["q"].mode == sm.MODE_DISABLED
+
+
+# ============================================================
+# 增量坐标合并
+# ============================================================
+def test_merge_coords_fills_missing() -> None:
+    s = Settings()
+    synced = merge_ahk_coords(s, _build_ahk_ini())
+    assert s.currency["alch"] == Point(352, 238)
+    assert s.currency["ex"] == Point(81, 505)
+    assert s.cyclone_coords["q"] == Point(1918, 1375)
+    assert "currency:alch" in synced and "cyclone:q" in synced
+    assert "cyclone:e" in synced
+
+
+def test_merge_coords_keeps_existing() -> None:
+    s = Settings()
+    s.currency["alch"] = Point(999, 999)
+    s.cyclone_coords["q"] = Point(1, 1)
+    synced = merge_ahk_coords(s, _build_ahk_ini())
+    assert s.currency["alch"] == Point(999, 999)  # 已标定的不覆盖
+    assert s.cyclone_coords["q"] == Point(1, 1)
+    assert "currency:alch" not in synced and "cyclone:q" not in synced
+    assert s.currency["ex"] == Point(81, 505)  # 缺失的仍填充
+
+
+def test_merge_coords_does_not_touch_other_settings() -> None:
+    s = Settings()
+    s.cell_size = 72
+    merge_ahk_coords(s, _build_ahk_ini())
+    assert s.cell_size == 72  # AHK 里 CellSize=70，合并不覆盖

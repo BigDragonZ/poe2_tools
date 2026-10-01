@@ -30,7 +30,7 @@ from tkinter import scrolledtext, ttk
 import cv2
 
 from poe2_tools.bridge.bus import bus
-from poe2_tools.config.migrate import migrate_file
+from poe2_tools.config.migrate import merge_ahk_coords_file, migrate_file
 from poe2_tools.config.settings import (
     CYCLONE_PROFILE,
     EMERGENCY_HOTKEY,
@@ -120,8 +120,15 @@ class Poe2ToolsApp:
             if migrated is not None:
                 self._boot_logs.append("检测到旧版 AHK 配置，已自动迁移到 poe2_tools.ini")
                 return migrated
+        settings = load_settings()
+        # 已有新配置但坐标缺失时，从旧版 AHK 配置增量同步坐标（不覆盖已有值）
+        synced = merge_ahk_coords_file(settings, AHK_INI_PATH)
+        if synced:
+            save_settings(settings)
+            names = "、".join(self._calib_name(target) for target in synced)
+            self._boot_logs.append(f"已从旧版 AHK 配置同步坐标：{names}")
         self._boot_logs.append(f"已加载配置：{INI_PATH}")
-        return load_settings()
+        return settings
 
     # ============================================================
     # UI 构建

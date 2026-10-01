@@ -133,3 +133,38 @@ def migrate_file(ahk_ini: Path, target_ini: Path) -> Settings | None:
     settings = migrate_ahk_config(ahk_ini.read_bytes())
     save_settings(settings, target_ini)
     return settings
+
+
+def merge_ahk_coords(settings: Settings, raw: bytes) -> list[str]:
+    """
+    增量合并 AHK ini 中的坐标数据（货币 + 旋风 Q/E）到现有配置。
+    只填充当前未标定的项，不覆盖已有坐标与其他配置。
+    返回本次同步的项目名列表（如 ["currency:alch", "cyclone:q"]）。
+    """
+    config = configparser.ConfigParser()
+    config.optionxform = str
+    config.read_file(io.StringIO(decode_ahk_ini(raw)))
+
+    synced: list[str] = []
+    for key in CURRENCY_KEYS:
+        if key in settings.currency:
+            continue
+        x, y = _get(config, "Currency", f"{key}_x"), _get(config, "Currency", f"{key}_y")
+        if x and y:
+            settings.currency[key] = Point(int(x), int(y))
+            synced.append(f"currency:{key}")
+    for key in CYC_DETECT_KEYS:
+        if key in settings.cyclone_coords:
+            continue
+        x, y = _get(config, "Cyclone", f"{key}_x"), _get(config, "Cyclone", f"{key}_y")
+        if x and y:
+            settings.cyclone_coords[key] = Point(int(x), int(y))
+            synced.append(f"cyclone:{key}")
+    return synced
+
+
+def merge_ahk_coords_file(settings: Settings, ahk_ini: Path) -> list[str]:
+    """从 AHK ini 文件增量合并坐标；文件不存在时返回空列表。"""
+    if not ahk_ini.exists():
+        return []
+    return merge_ahk_coords(settings, ahk_ini.read_bytes())
