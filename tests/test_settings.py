@@ -49,7 +49,7 @@ def test_roundtrip(temp_ini: Path) -> None:
     s.way_tier = 2
     s.currency["alch"] = Point(352, 238)
     s.cyclone_coords["q"] = Point(1918, 1375)
-    s.profiles[1]["q"] = sm.KeyConfig(sm.MODE_SPAM, 4600, False)
+    s.profiles[0]["q"] = sm.KeyConfig(sm.MODE_SPAM, 4600, False)
     save_settings(s)
 
     loaded = load_settings()
@@ -58,7 +58,7 @@ def test_roundtrip(temp_ini: Path) -> None:
     assert loaded.way_currency == "ex" and loaded.way_tier == 2
     assert loaded.currency["alch"] == Point(352, 238)
     assert loaded.cyclone_coords["q"] == Point(1918, 1375)
-    q = loaded.profiles[1]["q"]
+    q = loaded.profiles[0]["q"]
     assert q.mode == sm.MODE_SPAM and q.interval_ms == 4600 and q.random_jitter is False
 
 

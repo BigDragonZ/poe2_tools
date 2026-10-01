@@ -64,7 +64,7 @@ D:/game/poe2_tools/
 │   ├── bridge/             # 进程内事件总线（bus）与可选 WebSocket 桥接
 │   └── ui/                 # tkinter 界面
 │       ├── app.py          # 主窗口与控制器：状态区 + 热键注册 + 标定/截图/急停 + 日志区
-│       ├── profile_tab.py  # 配置1-4 页（8 行按键策略）
+│       ├── profile_tab.py  # 配置页（8 行按键策略）
 │       ├── cyclone_tab.py  # 旋风页（鼠标三键 + Q/E 数字检测标定/截图）
 │       ├── coords_tab.py   # 坐标页（10 种货币标定）
 │       ├── settings_panel.py  # 右侧功能设置区（热键/参数/保存）

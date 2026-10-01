@@ -81,11 +81,12 @@ def test_migrate_cyclone_mouse_keys() -> None:
     assert s.cyclone["MButton"].mode == sm.MODE_DISABLED
 
 
-def test_migrate_unconfigured_profiles_use_defaults() -> None:
+def test_migrate_migrates_single_profile() -> None:
     s = migrate_ahk_config(_build_ahk_ini())
-    # 只有配置1 有数据，配置2-4 保持默认
-    assert s.profiles[1]["LButton"].mode == sm.MODE_SPAM
-    assert s.profiles[1]["q"].mode == sm.MODE_DISABLED
+    # 只保留一个配置页，配置1 的数据迁移到 profiles[0]
+    assert len(s.profiles) == 1
+    assert s.profiles[0]["LButton"].mode == sm.MODE_SPAM
+    assert s.profiles[0]["q"].mode == sm.MODE_SPAM
 
 
 # ============================================================

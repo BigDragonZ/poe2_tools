@@ -71,8 +71,8 @@ class Poe2ToolsApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("POE2 游玩工具")
-        self.root.geometry("780x680")
-        self.root.minsize(720, 620)
+        self.root.geometry("960x680")
+        self.root.minsize(920, 620)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self._boot_logs: list[str] = []
@@ -103,7 +103,7 @@ class Poe2ToolsApp:
             f"标定: F3/F4/F5，急停: {EMERGENCY_HOTKEY.upper()}"
         )
 
-        # 标签页选中当前生效配置（配置1-4 / 旋风）
+        # 标签页选中当前生效配置（配置1 / 旋风）
         profile_index = self.settings.active_profile - 1
         if 0 <= profile_index <= CYCLONE_PROFILE - 1:
             self.notebook.select(profile_index)

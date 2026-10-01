@@ -32,8 +32,8 @@
 
 **`config/settings.py`** — 配置模型与 ini 读写（UTF-8，configparser）。
 
-- 数据模型：`Point(x, y)` 客户区坐标点；`KeyConfig(mode, interval_ms, random_jitter)` 单键战斗配置；`Settings` 全部配置（热键、背包网格、石碑/地图、旋风、货币坐标、配置1-4、桥接）
-- 常量：`PROFILE_COUNT = 4`、`CYCLONE_PROFILE = 5`、`SKILL_KEYS`（8 键）、`CYC_KEYS`（鼠标三键）、`MODES = ("disabled", "spam", "hold")`、批量/抖动/旋风检测相关常量、`EMERGENCY_HOTKEY = "f12"`
+- 数据模型：`Point(x, y)` 客户区坐标点；`KeyConfig(mode, interval_ms, random_jitter)` 单键战斗配置；`Settings` 全部配置（热键、背包网格、石碑/地图、旋风、货币坐标、战斗配置页、桥接）
+- 常量：`PROFILE_COUNT = 1`、`CYCLONE_PROFILE = 2`、`SKILL_KEYS`（8 键）、`CYC_KEYS`（鼠标三键）、`MODES = ("disabled", "spam", "hold")`、批量/抖动/旋风检测相关常量、`EMERGENCY_HOTKEY = "f12"`
 - 关键函数：
   - `load_settings(path=None) -> Settings` — 从 ini 加载，字段非法时回退默认值并夹取范围
   - `save_settings(s, path=None) -> None` — 写回 ini（UTF-8）
@@ -136,7 +136,7 @@
 ### 2.5 ui/（界面层，tkinter）
 
 - **`ui/app.py`** — `Poe2ToolsApp(root)` 主窗口与控制器：状态区 + 标签页 + 功能设置区 + 日志区；启动时按需迁移 AHK 旧配置；注册全局热键（战斗/整理/石碑/地图仅 POE2 前台生效，F3/F4 背包标定、F5 记录标定点、F12 全局急停）；`run_app()` 主入口
-- **`ui/profile_tab.py`** — `ProfileTab(notebook, index)` 战斗配置页（配置1-4，8 行按键）
+- **`ui/profile_tab.py`** — `ProfileTab(notebook, index)` 战斗配置页（8 行按键）
 - **`ui/cyclone_tab.py`** — `CycloneTab(master, on_calibrate, on_screenshot)` 旋风页：鼠标三键策略 + Q/E 标定/截图按钮
 - **`ui/coords_tab.py`** — `CoordsTab(master, on_calibrate)` 坐标页：10 种货币标定（双列：左三级货币、右普通货币）
 - **`ui/settings_panel.py`** — `SettingsPanel(master, on_save)` 右侧功能设置区：热键 + 背包/石碑/地图参数 + 保存
@@ -257,7 +257,7 @@ JSON Schema：
 |----|------|--------|----------|
 | CombatHotkey | 战斗宏启停热键 | f2 | 非空字符串（keyboard 热键语法） |
 | DumpHotkey | 背包整理启停热键 | f1 | 同上 |
-| ActiveProfile | 当前生效配置页 | 1 | 1-5（1-4 = 配置1-4，5 = 旋风） |
+| ActiveProfile | 当前生效配置页 | 1 | 1-2（1 = 配置，2 = 旋风） |
 
 ### [Waystone]（石碑速点）
 
@@ -303,9 +303,9 @@ JSON Schema：
 - 三级货币（标定一级，二级 +70px、三级 +140px 向右推导）：`trans` 蜕变、`aug` 增幅、`regal` 富豪、`ex` 崇高、`chaos` 混沌
 - 普通货币：`alch` 点金石、`vaal` 瓦尔、`whet` 磨刀石、`scrap` 护甲片、`etch` 奥术师
 
-### [Profile1] - [Profile4]（战斗配置页）
+### [Profile1]（战斗配置页）
 
-每页 8 个按键（LButton/RButton/Space/q/w/e/r/t）各一组 `{key}_mode` / `{key}_interval` / `{key}_random`，含义与默认同 [Cyclone] 的鼠标键组。
+8 个按键（LButton/RButton/Space/q/w/e/r/t）各一组 `{key}_mode` / `{key}_interval` / `{key}_random`，含义与默认同 [Cyclone] 的鼠标键组。
 
 ### [Bridge]（WebSocket 桥）
 

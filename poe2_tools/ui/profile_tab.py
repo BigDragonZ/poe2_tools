@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""战斗配置页（配置1-4）：8 个按键的策略 / 执行间隔 / 随机抖动。"""
+"""战斗配置页：8 个按键的策略 / 执行间隔 / 随机抖动。"""
 
 from __future__ import annotations
 

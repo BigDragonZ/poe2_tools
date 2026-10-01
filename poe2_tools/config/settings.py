@@ -4,7 +4,7 @@
 配置模型与 ini 读写（UTF-8）。
 
 集中定义桌面工具的全部配置：热键、背包网格、石碑/地图速点、
-货币坐标、战斗配置页（配置1-4）与旋风页。读写通过 configparser，
+货币坐标、战斗配置页与旋风页。读写通过 configparser，
 编码固定 UTF-8；坐标均为 POE2 客户区坐标（与 AHK 版约定一致）。
 """
 
@@ -23,8 +23,8 @@ POE_WINDOW_TITLE = "Path of Exile 2"
 # ============================================================
 # 常量（与 AHK 版规约一致）
 # ============================================================
-PROFILE_COUNT = 4
-CYCLONE_PROFILE = 5  # 旋风配置页序号
+PROFILE_COUNT = 1
+CYCLONE_PROFILE = PROFILE_COUNT + 1  # 旋风配置页序号（跟在普通配置页之后）
 
 # 普通战斗配置页按键（内部标识沿用 AHK 命名，界面显示名见 ui 层）
 SKILL_KEYS = ["LButton", "RButton", "Space", "q", "w", "e", "r", "t"]
@@ -139,7 +139,7 @@ def default_cyclone() -> dict[str, KeyConfig]:
 
 
 def default_profiles() -> list[dict[str, KeyConfig]]:
-    """四个战斗配置页的默认配置。"""
+    """普通战斗配置页的默认配置。"""
     return [{key: default_key_config(key) for key in SKILL_KEYS} for _ in range(PROFILE_COUNT)]
 
 

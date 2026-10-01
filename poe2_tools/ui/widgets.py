@@ -3,7 +3,7 @@
 """
 界面共享小部件与显示名映射。
 
-KeyRowsFrame 复用于配置1-4 与旋风页：每行一个按键，
+KeyRowsFrame 复用于配置页与旋风页：每行一个按键，
 包含策略下拉（禁用/连点/按住不放）、执行间隔输入框、随机抖动复选框。
 """
 
@@ -25,7 +25,7 @@ MODE_LABELS = {MODE_DISABLED: "禁用", MODE_SPAM: "连点", MODE_HOLD: "按住�
 LABEL_TO_MODE = {label: mode for mode, label in MODE_LABELS.items()}
 MODE_CHOICES = [MODE_LABELS[mode] for mode in (MODE_DISABLED, MODE_SPAM, MODE_HOLD)]
 
-# 配置1-4 按键显示名（内部标识沿用 AHK 命名）
+# 配置页按键显示名（内部标识沿用 AHK 命名）
 SKILL_NAMES = {
     "LButton": "左键", "RButton": "右键", "Space": "空格",
     "q": "Q", "w": "W", "e": "E", "r": "R", "t": "T",
