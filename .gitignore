@@ -5,3 +5,6 @@ __pycache__/
 poe2_tools.ini
 web/data/
 web/static/icons/
+templates/
+cyclone_debug.log
+temp/

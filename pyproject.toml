@@ -12,6 +12,9 @@ dependencies = [
     "apscheduler>=3.11.3",
     "beautifulsoup4>=4.15.0",
     "requests>=2.34.2",
+    "opencv-python>=5.0.0.93",
+    "mss>=10.2.0",
+    "pillow>=12.3.0",
 ]
 
 [dependency-groups]
