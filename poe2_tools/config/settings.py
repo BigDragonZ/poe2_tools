@@ -88,11 +88,11 @@ class Point:
 
 @dataclass
 class KeyConfig:
-    """单个按键的战斗配置。"""
+    """单个按键的战斗配置。jitter_ms 为毫秒级随机附加（间隔 + 0~jitter_ms）。"""
 
     mode: str = MODE_DISABLED
     interval_ms: int = DEF_INTERVAL_MS
-    random_jitter: bool = True
+    jitter_ms: int = 0
 
 
 @dataclass
@@ -127,10 +127,10 @@ class Settings:
 
 
 def default_key_config(key: str) -> KeyConfig:
-    """按键默认配置：鼠标左键连点 100ms，其余禁用。"""
+    """按键默认配置：鼠标左键连点 100ms，其余禁用；抖动默认 15ms。"""
     if key == "LButton":
-        return KeyConfig(MODE_SPAM, 100, True)
-    return KeyConfig(MODE_DISABLED, DEF_INTERVAL_MS, True)
+        return KeyConfig(MODE_SPAM, 100, 15)
+    return KeyConfig(MODE_DISABLED, DEF_INTERVAL_MS, 15)
 
 
 def default_cyclone() -> dict[str, KeyConfig]:
@@ -168,8 +168,16 @@ def _read_key_config(
     mode = _read_mode(config, section, f"{key}_mode", default.mode)
     interval = _to_int(config.get(section, f"{key}_interval", fallback=str(default.interval_ms)),
                        default.interval_ms)
-    rnd = _to_int(config.get(section, f"{key}_random", fallback="1"), 1)
-    return KeyConfig(mode, max(MIN_INTERVAL_MS, interval), bool(rnd))
+    # 抖动毫秒数（间隔 + 0~jitter_ms）；兼容旧版布尔键 _random（1 → 间隔的 15%）
+    jitter_raw = config.get(section, f"{key}_jitter", fallback="").strip()
+    if jitter_raw:
+        jitter = _clamp(_to_int(jitter_raw, default.jitter_ms), 0, MAX_BATCH_INTERVAL_MS)
+    else:
+        legacy_random = _to_int(config.get(section, f"{key}_random", fallback=""), -1)
+        jitter = round(interval * 0.15) if legacy_random == 1 else (
+            0 if legacy_random == 0 else default.jitter_ms
+        )
+    return KeyConfig(mode, max(MIN_INTERVAL_MS, interval), jitter)
 
 
 def _read_point(config: configparser.ConfigParser, section: str, key: str) -> Point | None:
@@ -275,7 +283,7 @@ def save_settings(s: Settings, path: Path | None = None) -> None:
         c = s.cyclone.get(key, default_key_config(key))
         cyclone_section[f"{key}_mode"] = c.mode
         cyclone_section[f"{key}_interval"] = str(c.interval_ms)
-        cyclone_section[f"{key}_random"] = "1" if c.random_jitter else "0"
+        cyclone_section[f"{key}_jitter"] = str(c.jitter_ms)
     for key in CYC_DETECT_KEYS:
         if key in s.cyclone_coords:
             p = s.cyclone_coords[key]
@@ -297,7 +305,7 @@ def save_settings(s: Settings, path: Path | None = None) -> None:
             c = s.profiles[i].get(key, default_key_config(key))
             section[f"{key}_mode"] = c.mode
             section[f"{key}_interval"] = str(c.interval_ms)
-            section[f"{key}_random"] = "1" if c.random_jitter else "0"
+            section[f"{key}_jitter"] = str(c.jitter_ms)
         config[f"Profile{i + 1}"] = section
 
     config["Bridge"] = {"Enabled": "1" if s.bridge_enabled else "0", "Port": str(s.bridge_port)}

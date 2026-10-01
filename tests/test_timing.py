@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from poe2_tools.config.settings import MIN_INTERVAL_MS
-from poe2_tools.core.scheduler import JITTER_RATIO, SpamScheduler
+from poe2_tools.core.scheduler import SpamScheduler
 from poe2_tools.core.timing import clamp, jitter_ms
 
 
@@ -43,26 +43,34 @@ def test_start_staggers_first_due_within_interval() -> None:
 def test_reschedule_without_jitter() -> None:
     scheduler = SpamScheduler(rng=lambda: 0.0)
     scheduler.start({"q": 500}, now=0.0)
-    scheduler.reschedule("q", 500, random_jitter=False, now=1.0)
+    scheduler.reschedule("q", 500, jitter_ms=0, now=1.0)
     assert scheduler.collect_due(1.4) == []
     assert scheduler.collect_due(1.5) == ["q"]
 
 
-def test_reschedule_jitter_within_ratio() -> None:
+def test_reschedule_jitter_adds_up_to_jitter_ms() -> None:
     for r in (0.0, 0.5, 1.0):
         scheduler = SpamScheduler(rng=lambda: r)
         scheduler.start({"q": 1000}, now=0.0)
-        scheduler.reschedule("q", 1000, random_jitter=True, now=5.0)
-        lo = 5.0 + 1000 * (1 - JITTER_RATIO) / 1000.0
-        hi = 5.0 + 1000 * (1 + JITTER_RATIO) / 1000.0
+        scheduler.reschedule("q", 1000, jitter_ms=150, now=5.0)
+        lo = 5.0 + 1000 / 1000.0            # 间隔本身
+        hi = 5.0 + (1000 + 150) / 1000.0    # 间隔 + 最大抖动
         assert scheduler.collect_due(lo - 0.001) == []
         assert scheduler.collect_due(hi + 0.001) == ["q"]
+
+
+def test_reschedule_jitter_exact_addition() -> None:
+    scheduler = SpamScheduler(rng=lambda: 0.5)
+    scheduler.start({"q": 1000}, now=0.0)
+    scheduler.reschedule("q", 1000, jitter_ms=200, now=0.0)  # +100ms
+    assert scheduler.collect_due(1.099) == []
+    assert scheduler.collect_due(1.1) == ["q"]
 
 
 def test_reschedule_enforces_min_interval() -> None:
     scheduler = SpamScheduler(rng=lambda: 0.0)
     scheduler.start({"q": 10}, now=0.0)
-    scheduler.reschedule("q", 10, random_jitter=False, now=0.0)
+    scheduler.reschedule("q", 10, jitter_ms=0, now=0.0)
     assert scheduler.collect_due(MIN_INTERVAL_MS / 1000.0 - 0.001) == []
     assert scheduler.collect_due(MIN_INTERVAL_MS / 1000.0) == ["q"]
 

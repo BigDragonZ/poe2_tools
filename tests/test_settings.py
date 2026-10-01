@@ -49,7 +49,7 @@ def test_roundtrip(temp_ini: Path) -> None:
     s.way_tier = 2
     s.currency["alch"] = Point(352, 238)
     s.cyclone_coords["q"] = Point(1918, 1375)
-    s.profiles[0]["q"] = sm.KeyConfig(sm.MODE_SPAM, 4600, False)
+    s.profiles[0]["q"] = sm.KeyConfig(sm.MODE_SPAM, 4600, 690)
     save_settings(s)
 
     loaded = load_settings()
@@ -59,7 +59,7 @@ def test_roundtrip(temp_ini: Path) -> None:
     assert loaded.currency["alch"] == Point(352, 238)
     assert loaded.cyclone_coords["q"] == Point(1918, 1375)
     q = loaded.profiles[0]["q"]
-    assert q.mode == sm.MODE_SPAM and q.interval_ms == 4600 and q.random_jitter is False
+    assert q.mode == sm.MODE_SPAM and q.interval_ms == 4600 and q.jitter_ms == 690
 
 
 def test_saved_as_utf8(temp_ini: Path) -> None:
@@ -79,6 +79,26 @@ def test_invalid_mode_falls_back(temp_ini: Path) -> None:
 def test_interval_clamped_to_minimum(temp_ini: Path) -> None:
     write_ini(temp_ini, "Profile1", {"q_mode": "spam", "q_interval": "10"})
     assert load_settings().profiles[0]["q"].interval_ms == sm.MIN_INTERVAL_MS
+
+
+def test_jitter_ms_read_directly(temp_ini: Path) -> None:
+    write_ini(temp_ini, "Profile1", {"q_jitter": "120"})
+    assert load_settings().profiles[0]["q"].jitter_ms == 120
+
+
+def test_jitter_ms_clamped_to_range(temp_ini: Path) -> None:
+    write_ini(temp_ini, "Profile1", {"q_jitter": "-5", "w_jitter": "99999"})
+    s = load_settings()
+    assert s.profiles[0]["q"].jitter_ms == 0
+    assert s.profiles[0]["w"].jitter_ms == sm.MAX_BATCH_INTERVAL_MS
+
+
+def test_legacy_random_switch_converts(temp_ini: Path) -> None:
+    # 旧版布尔键 _random：1 → 间隔的 15%，0 → 0
+    write_ini(temp_ini, "Profile1", {"q_interval": "1000", "q_random": "1", "w_random": "0"})
+    s = load_settings()
+    assert s.profiles[0]["q"].jitter_ms == 150
+    assert s.profiles[0]["w"].jitter_ms == 0
 
 
 def test_batch_interval_clamped(temp_ini: Path) -> None:

@@ -32,7 +32,7 @@
 
 **`config/settings.py`** — 配置模型与 ini 读写（UTF-8，configparser）。
 
-- 数据模型：`Point(x, y)` 客户区坐标点；`KeyConfig(mode, interval_ms, random_jitter)` 单键战斗配置；`Settings` 全部配置（热键、背包网格、石碑/地图、旋风、货币坐标、战斗配置页、桥接）
+- 数据模型：`Point(x, y)` 客户区坐标点；`KeyConfig(mode, interval_ms, jitter_ms)` 单键战斗配置；`Settings` 全部配置（热键、背包网格、石碑/地图、旋风、货币坐标、战斗配置页、桥接）
 - 常量：`PROFILE_COUNT = 1`、`CYCLONE_PROFILE = 2`、`SKILL_KEYS`（8 键）、`CYC_KEYS`（鼠标三键）、`MODES = ("disabled", "spam", "hold")`、批量/抖动/旋风检测相关常量、`EMERGENCY_HOTKEY = "f12"`
 - 关键函数：
   - `load_settings(path=None) -> Settings` — 从 ini 加载，字段非法时回退默认值并夹取范围
@@ -73,10 +73,9 @@
 
 **`core/scheduler.py`** — 连点调度器（纯逻辑）。
 
-- `JITTER_RATIO = 0.15`（战斗连点 ±15% 抖动）
 - `SpamScheduler.start(intervals_ms, now)` — 各键首次到期 `now + rand(0, interval)`，错开首帧
 - `collect_due(now) -> list[str]` — 到期按键列表
-- `reschedule(key, interval_ms, random_jitter, now)` — 触发后按「当前时刻 + 抖动间隔」重排，下限 50ms，间隔精确不漂移
+- `reschedule(key, interval_ms, jitter_ms, now)` — 触发后按「当前时刻 + 间隔 + 0~jitter_ms 随机附加」重排，下限 50ms，间隔精确不漂移
 - `stop()` — 清空调度状态
 
 **`core/timing.py`** — 时间规约纯逻辑。
@@ -291,8 +290,8 @@ JSON Schema：
 | 键 | 含义 | 默认值 | 取值范围 |
 |----|------|--------|----------|
 | {key}_mode | 策略 | LButton = spam，其余 disabled | disabled / spam / hold |
-| {key}_interval | 执行间隔 ms | LButton = 100，其余 300 | ≥ 50（±15% 抖动，可关） |
-| {key}_random | 随机抖动开关 | 1 | 0 / 1 |
+| {key}_interval | 执行间隔 ms | LButton = 100，其余 300 | ≥ 50 |
+| {key}_jitter | 随机抖动 ms（实际间隔 = 执行间隔 + 0~抖动值） | 15 | 0-5000（兼容旧版 {key}_random 布尔键：1 → 间隔的 15%） |
 
 另有 Q/E 数字检测标定点（可选）：`q_x`/`q_y`、`e_x`/`e_y`（客户区坐标）。
 
@@ -305,7 +304,7 @@ JSON Schema：
 
 ### [Profile1]（战斗配置页）
 
-8 个按键（LButton/RButton/Space/q/w/e/r/t）各一组 `{key}_mode` / `{key}_interval` / `{key}_random`，含义与默认同 [Cyclone] 的鼠标键组。
+8 个按键（LButton/RButton/Space/q/w/e/r/t）各一组 `{key}_mode` / `{key}_interval` / `{key}_jitter`，含义与默认同 [Cyclone] 的鼠标键组。
 
 ### [Bridge]（WebSocket 桥）
 
@@ -327,7 +326,7 @@ JSON Schema：
 | 项 | 数值 | 位置 |
 |----|------|------|
 | 战斗宏调度节拍 | 10ms（`LOOP_TICK = 0.01`） | modules/combat.py |
-| 战斗连点抖动 | ±15%，下限 50ms | core/scheduler.py（JITTER_RATIO）、config（MIN_INTERVAL_MS） |
+| 战斗连点抖动 | 间隔 + 0~jitter_ms 毫秒级随机附加（每键可配，默认 15ms），下限 50ms | core/scheduler.py（reschedule）、config（MIN_INTERVAL_MS） |
 | 战斗连点默认间隔 | 300ms（LButton 默认连点 100ms） | config/settings.py |
 | 批量操作抖动 | ±30%，范围 5-5000ms | config/settings.py（BATCH_JITTER 等） |
 | 批量操作默认间隔 | 整理 30ms / 石碑 50ms / 地图 50ms | config/settings.py |

@@ -48,16 +48,16 @@ def clamp(value: int, lo: int, hi: int) -> int:
 
 
 class KeyRowsFrame(ttk.Frame):
-    """一组按键配置行：策略下拉 + 执行间隔输入 + 随机抖动复选框。"""
+    """一组按键配置行：策略下拉 + 执行间隔输入 + 抖动毫秒输入。"""
 
     def __init__(self, master: tk.Misc, keys: list[str], names: dict[str, str]) -> None:
         super().__init__(master, padding=4)
         self._keys = list(keys)
         self._mode_vars: dict[str, tk.StringVar] = {}
         self._interval_vars: dict[str, tk.StringVar] = {}
-        self._jitter_vars: dict[str, tk.BooleanVar] = {}
+        self._jitter_vars: dict[str, tk.StringVar] = {}
 
-        for col, title in enumerate(("按键", "策略", "执行间隔(ms)", "随机抖动")):
+        for col, title in enumerate(("按键", "策略", "执行间隔(ms)", "随机抖动(+ms)")):
             ttk.Label(self, text=title, foreground="#64748b").grid(
                 row=0, column=col, sticky=tk.W, padx=(0, 8), pady=(0, 4)
             )
@@ -75,8 +75,8 @@ class KeyRowsFrame(ttk.Frame):
             ttk.Entry(self, textvariable=interval_var, width=8).grid(
                 row=row, column=2, sticky=tk.W, padx=(0, 8), pady=2
             )
-            jitter_var = tk.BooleanVar(value=True)
-            ttk.Checkbutton(self, text="±15%", variable=jitter_var).grid(
+            jitter_var = tk.StringVar(value="0")
+            ttk.Entry(self, textvariable=jitter_var, width=8).grid(
                 row=row, column=3, sticky=tk.W, pady=2
             )
             self._mode_vars[key] = mode_var
@@ -91,13 +91,13 @@ class KeyRowsFrame(ttk.Frame):
                 continue
             self._mode_vars[key].set(MODE_LABELS.get(config.mode, MODE_LABELS[MODE_DISABLED]))
             self._interval_vars[key].set(str(config.interval_ms))
-            self._jitter_vars[key].set(config.random_jitter)
+            self._jitter_vars[key].set(str(config.jitter_ms))
 
     def sync_to(self, configs: dict[str, KeyConfig]) -> None:
-        """把控件值同步回配置（间隔夹取到 ≥ MIN_INTERVAL_MS）。"""
+        """把控件值同步回配置（间隔夹取到 ≥ MIN_INTERVAL_MS，抖动夹取到 0-5000）。"""
         for key in self._keys:
             config = configs.setdefault(key, KeyConfig())
             config.mode = LABEL_TO_MODE.get(self._mode_vars[key].get(), MODE_DISABLED)
             interval = parse_int(self._interval_vars[key].get(), config.interval_ms)
             config.interval_ms = max(MIN_INTERVAL_MS, interval)
-            config.random_jitter = self._jitter_vars[key].get()
+            config.jitter_ms = clamp(parse_int(self._jitter_vars[key].get(), config.jitter_ms), 0, 5000)

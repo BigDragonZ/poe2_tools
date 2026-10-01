@@ -73,8 +73,10 @@ def _migrate_key_config(
 ) -> KeyConfig:
     mode = _MODE_MAP.get(_get(config, section, f"{key}_mode"), default.mode)
     interval = _get_int(config, section, f"{key}_interval", default.interval_ms)
-    random_jitter = _get_int(config, section, f"{key}_random", 1) == 1
-    return KeyConfig(mode, interval, random_jitter)
+    # AHK 的 ±15% 比例抖动（0/1 开关）折算为等效毫秒数
+    random_on = _get_int(config, section, f"{key}_random", 1) == 1
+    jitter_ms = round(interval * 0.15) if random_on else 0
+    return KeyConfig(mode, interval, jitter_ms)
 
 
 def migrate_ahk_config(raw: bytes) -> Settings:

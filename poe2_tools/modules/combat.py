@@ -4,8 +4,9 @@
 战斗宏：多按键连点/按住 + 旋风 Q/E 数字检测触发。
 
 - 10ms 节拍调度循环 + SpamScheduler 到期时间驱动，间隔精确不漂移
+- 连点间隔带毫秒级随机附加（0~jitter_ms，每键可配）
 - 按住不放键在启动时按下、停止/失焦/急停时全部释放
-- 旋风页（active_profile == 5）：鼠标三键走同一调度，
+- 旋风页（active_profile == CYCLONE_PROFILE）：鼠标三键走同一调度，
   Q/E 由 CycloneWatcher 后台线程做数字检测、边沿触发按键
 - POE2 窗口失焦自动停止
 """
@@ -150,7 +151,7 @@ class CombatMacro:
                     if c is None:
                         continue
                     core_input.press(key)
-                    self._scheduler.reschedule(key, c.interval_ms, c.random_jitter, now)
+                    self._scheduler.reschedule(key, c.interval_ms, c.jitter_ms, now)
                 self._stop.wait(LOOP_TICK)
         finally:
             self.stop()

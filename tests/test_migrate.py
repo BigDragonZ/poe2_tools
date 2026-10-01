@@ -70,9 +70,16 @@ def test_migrate_mode_mapping() -> None:
     assert profile1["LButton"].mode == sm.MODE_SPAM
     assert profile1["RButton"].mode == sm.MODE_DISABLED
     q = profile1["q"]
-    assert q.mode == sm.MODE_SPAM and q.interval_ms == 4600 and q.random_jitter is False
+    assert q.mode == sm.MODE_SPAM and q.interval_ms == 4600 and q.jitter_ms == 0
     e = profile1["e"]
     assert e.mode == sm.MODE_SPAM and e.interval_ms == 3280
+
+
+def test_migrate_random_switch_converts_to_jitter_ms() -> None:
+    s = migrate_ahk_config(_build_ahk_ini())
+    # AHK _random=1（±15% 比例）折算为等效毫秒：100ms → 15ms
+    assert s.profiles[0]["LButton"].jitter_ms == 15
+    assert s.cyclone["LButton"].jitter_ms == 15
 
 
 def test_migrate_cyclone_mouse_keys() -> None:
