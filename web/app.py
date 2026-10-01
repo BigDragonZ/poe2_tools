@@ -13,7 +13,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import db, scraper, scheduler, trading
-from .service import get_refresh_status, start_refresh
+from .service import (get_library_status, get_refresh_status,
+                      start_library_scrape, start_refresh)
 
 STATIC_DIR = Path(__file__).parent / "static"
 ICONS_DIR = STATIC_DIR / "icons"
@@ -296,6 +297,29 @@ def api_put_gold_values(body: GoldValuesIn):
         v = getattr(body, u)
         db.set_setting("trade_gold_value:" + u, str(v) if v and v > 0 else "")
     return _gold_values()
+
+
+# ---------- 信息库 ----------
+
+@app.get("/api/library")
+def api_library(search: str | None = None, module_slug: str | None = None):
+    """信息库物品列表：中英文名称、模块、wiki 链接、Currency Exchange 金币消耗。"""
+    return {"items": db.list_library_items(search=search, module_slug=module_slug)}
+
+
+@app.post("/api/library/refresh")
+def api_library_refresh(mode: str = "missing"):
+    """后台抓取 wiki 信息（金币消耗）。mode=missing 只抓缺失，mode=all 全部重抓。"""
+    if mode not in ("missing", "all"):
+        raise HTTPException(400, "mode 取值 missing|all")
+    if not start_library_scrape(mode):
+        raise HTTPException(409, "已有信息库抓取任务进行中")
+    return {"ok": True, "mode": mode}
+
+
+@app.get("/api/library/status")
+def api_library_status():
+    return get_library_status()
 
 
 # ---------- 元信息 ----------

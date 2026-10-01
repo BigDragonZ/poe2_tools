@@ -193,6 +193,45 @@ def extract_chaos_per_divine(items):
     return None
 
 
+# ---------- Wiki 物品页解析（信息库） ----------
+
+_CJK_RE = re.compile(r"[㐀-䶿一-鿿]")
+
+
+def _has_cjk(text):
+    return bool(_CJK_RE.search(text))
+
+
+def parse_wiki_item_info(html):
+    """解析 wiki 物品页，返回 {"gold_cost", "name_zh", "name_en"}。
+
+    gold_cost 取自属性表 "Currency Exchange" 行（如 "800 Gold"），
+    即游戏内市场交易的每单位金币消耗；该物品不支持市场交易时为 None。
+    中/英文名取自 BaseType 行（英文行与中文行各一），找不到为 None。
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    gold_cost = None
+    name_zh = None
+    name_en = None
+    for td in soup.find_all("td"):
+        label = td.get_text(strip=True)
+        value_td = td.find_next_sibling("td")
+        if value_td is None:
+            continue
+        value = value_td.get_text(strip=True)
+        if label == "Currency Exchange" and gold_cost is None:
+            m = re.search(r"([\d,]+(?:\.\d+)?)\s*Gold", value, re.IGNORECASE)
+            if m:
+                gold_cost = float(m.group(1).replace(",", ""))
+        elif label.startswith("BaseType") and value:
+            if _has_cjk(value):
+                if name_zh is None:
+                    name_zh = value
+            elif name_en is None:
+                name_en = value
+    return {"gold_cost": gold_cost, "name_zh": name_zh, "name_en": name_en}
+
+
 def compute_prices(ref_currency, ref_amount, item_amount, chaos_per_divine):
     """计算 price_divine / price_chaos。
 
@@ -253,6 +292,17 @@ def fetch_module_items(module_slug, session=None, interval=REQUEST_INTERVAL):
         if to_visit:
             time.sleep(interval)
     return all_items, module_cards
+
+
+def fetch_wiki_item_info(wiki_slug, session=None):
+    """抓取一个物品的 wiki 页，返回 parse_wiki_item_info 结果 + wiki_url。"""
+    session = session or _make_session()
+    url = BASE_URL + wiki_slug
+    resp = session.get(url, timeout=REQUEST_TIMEOUT)
+    resp.raise_for_status()
+    info = parse_wiki_item_info(resp.text)
+    info["wiki_url"] = url
+    return info
 
 
 def fetch_all_modules(season_modules=None, interval=REQUEST_INTERVAL, progress_cb=None):

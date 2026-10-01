@@ -71,6 +71,15 @@ CREATE TABLE IF NOT EXISTS trade_rates (
     side TEXT NOT NULL DEFAULT 'sell',
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS item_info (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER UNIQUE NOT NULL REFERENCES items(id),
+    wiki_url TEXT,
+    gold_cost REAL,
+    name_zh TEXT,
+    name_en TEXT,
+    fetched_at TEXT NOT NULL
+);
 """
 
 # 写操作全局锁，保证 SQLite 写串行化
@@ -373,6 +382,8 @@ def get_item_icons_by_names(names, db_path=None):
         return {r["name_zh"]: r["icon_path"] for r in rows}
 
 
+# ---------- 信息库 ----------
+
 def get_gold_costs_by_slugs(slugs, db_path=None):
     """按物品 slug 查信息库的 Currency Exchange 金币消耗，返回 {slug: gold_cost}。
 
@@ -395,6 +406,72 @@ def get_gold_costs_by_slugs(slugs, db_path=None):
             list(slugs),
         ).fetchall()
         return {r["slug"]: r["gold_cost"] for r in rows}
+
+
+def upsert_item_info(item_id, wiki_url, gold_cost, name_zh, name_en, db_path=None):
+    """写入/更新物品的 wiki 信息（金币消耗与 wiki 端中英文名）。"""
+    with _DB_LOCK, _connect(db_path) as conn:
+        conn.execute(
+            """INSERT INTO item_info(item_id, wiki_url, gold_cost, name_zh, name_en, fetched_at)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(item_id) DO UPDATE SET
+                   wiki_url = excluded.wiki_url,
+                   gold_cost = excluded.gold_cost,
+                   name_zh = excluded.name_zh,
+                   name_en = excluded.name_en,
+                   fetched_at = excluded.fetched_at""",
+            (item_id, wiki_url, gold_cost, name_zh, name_en, _now()),
+        )
+
+
+def list_wiki_scrape_targets(only_missing=True, db_path=None):
+    """有 wiki 链接的物品抓取清单。only_missing=True 时只取尚未抓过 wiki 信息的。"""
+    sql = """SELECT i.id AS item_id, i.wiki_slug FROM items i
+             LEFT JOIN item_info info ON info.item_id = i.id
+             WHERE i.wiki_slug IS NOT NULL AND i.wiki_slug != ''"""
+    if only_missing:
+        sql += " AND info.item_id IS NULL"
+    sql += " ORDER BY i.id"
+    with _connect(db_path) as conn:
+        rows = conn.execute(sql).fetchall()
+        return [dict(r) for r in rows]
+
+
+def list_library_items(search=None, module_slug=None, db_path=None):
+    """信息库物品列表：中英文名称、所属模块、wiki 链接、金币消耗。
+
+    search 非空时对物品中/英文名、模块中/英文名（slug）、wiki_slug 做模糊检索。
+    """
+    conditions = []
+    params = []
+    if module_slug:
+        conditions.append("m.slug = ?")
+        params.append(module_slug)
+    if search and search.strip():
+        kw = "%" + search.strip() + "%"
+        conditions.append(
+            "(i.name_zh LIKE ? OR i.name_en LIKE ?"
+            " OR info.name_zh LIKE ? OR info.name_en LIKE ?"
+            " OR m.name_zh LIKE ? OR m.slug LIKE ?"
+            " OR i.slug LIKE ? OR i.wiki_slug LIKE ?)"
+        )
+        params.extend([kw] * 8)
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            f"""SELECT i.id AS item_id, i.slug, i.icon_path, i.wiki_slug,
+                       m.slug AS module_slug, m.name_zh AS module_name_zh,
+                       COALESCE(info.name_zh, i.name_zh) AS name_zh,
+                       COALESCE(info.name_en, i.name_en) AS name_en,
+                       info.wiki_url, info.gold_cost, info.fetched_at AS info_fetched_at
+                FROM items i
+                JOIN modules m ON m.id = i.module_id
+                LEFT JOIN item_info info ON info.item_id = i.id
+                {where}
+                ORDER BY m.id, i.slug""",
+            params,
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 # ---------- 设置 ----------

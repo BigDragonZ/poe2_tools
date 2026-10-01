@@ -145,3 +145,77 @@ def start_refresh(module_slug=None):
     thread = threading.Thread(target=_run_refresh, args=(module_slug,), daemon=True)
     thread.start()
     return True
+
+
+# ---------- 信息库 wiki 抓取 ----------
+
+# 信息库抓取进度（内存态，供前端轮询）
+_LIBRARY_STATUS = {
+    "running": False,
+    "mode": None,           # "missing" / "all"
+    "current_item": None,
+    "done": 0,
+    "total": 0,
+    "updated": 0,
+    "started_at": None,
+    "finished_at": None,
+    "error": None,
+}
+
+
+def get_library_status():
+    with _STATUS_LOCK:
+        return dict(_LIBRARY_STATUS)
+
+
+def _set_library_status(**kwargs):
+    with _STATUS_LOCK:
+        _LIBRARY_STATUS.update(kwargs)
+
+
+def is_library_running():
+    with _STATUS_LOCK:
+        return _LIBRARY_STATUS["running"]
+
+
+def _run_library_scrape(mode="missing", db_path=None):
+    """后台线程入口：逐个物品抓 wiki 页，提取 Currency Exchange 金币消耗。"""
+    targets = db.list_wiki_scrape_targets(only_missing=(mode == "missing"), db_path=db_path)
+    _set_library_status(running=True, mode=mode, current_item=None, done=0,
+                        total=len(targets), updated=0,
+                        started_at=datetime.now().isoformat(timespec="seconds"),
+                        finished_at=None, error=None)
+    session = scraper._make_session()
+    updated = 0
+    try:
+        for i, row in enumerate(targets):
+            if i > 0:
+                time.sleep(scraper.REQUEST_INTERVAL)
+            _set_library_status(current_item=row["wiki_slug"])
+            try:
+                info = scraper.fetch_wiki_item_info(row["wiki_slug"], session=session)
+                db.upsert_item_info(row["item_id"], info["wiki_url"], info["gold_cost"],
+                                    info["name_zh"], info["name_en"], db_path=db_path)
+                updated += 1
+            except Exception:
+                pass  # 单个物品失败不中断整体抓取
+            _set_library_status(done=i + 1, updated=updated)
+        _set_library_status(running=False,
+                            finished_at=datetime.now().isoformat(timespec="seconds"))
+    except Exception as exc:
+        _set_library_status(running=False, error=str(exc),
+                            finished_at=datetime.now().isoformat(timespec="seconds"))
+
+
+def start_library_scrape(mode="missing"):
+    """启动信息库后台抓取线程。mode: "missing"（只抓缺失）/ "all"（全部重抓）。
+
+    已在运行返回 False，否则返回 True。
+    """
+    if mode not in ("missing", "all"):
+        raise ValueError("mode 取值 missing|all")
+    if is_library_running():
+        return False
+    thread = threading.Thread(target=_run_library_scrape, args=(mode,), daemon=True)
+    thread.start()
+    return True

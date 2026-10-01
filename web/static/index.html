@@ -656,8 +656,144 @@ function TradePage() {
   );
 }
 
+// ---------- 信息库页 ----------
+
+function LibraryPage({ modules }) {
+  const [items, setItems] = useState(null);
+  const [search, setSearch] = useState("");
+  const [moduleSlug, setModuleSlug] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [statusText, setStatusText] = useState("");
+  const [sort, setSort] = useState({key: null, dir: "desc"});
+  const pollRef = useRef(null);
+
+  const load = useCallback((kw, slug) => {
+    const params = [];
+    if (kw && kw.trim()) params.push("search=" + encodeURIComponent(kw.trim()));
+    if (slug) params.push("module_slug=" + encodeURIComponent(slug));
+    api("/api/library" + (params.length ? "?" + params.join("&") : ""))
+      .then(j => setItems(j.items)).catch(() => setItems([]));
+  }, []);
+
+  // 搜索/模块筛选防抖后走服务端检索
+  useEffect(() => {
+    const t = setTimeout(() => load(search, moduleSlug), 300);
+    return () => clearTimeout(t);
+  }, [search, moduleSlug, load]);
+
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  const pollStatus = () => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(() => {
+      api("/api/library/status").then(st => {
+        if (st.running) {
+          setStatusText("抓取中：" + (st.current_item || "") + " (" + st.done + "/" + st.total + ")");
+        } else {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+          setRefreshing(false);
+          setStatusText(st.error ? "抓取失败：" + st.error
+                                 : "抓取完成，更新 " + st.updated + " 条");
+          load(search, moduleSlug);
+          setTimeout(() => setStatusText(""), 4000);
+        }
+      }).catch(() => {});
+    }, 1000);
+  };
+
+  const doRefresh = mode => {
+    setRefreshing(true);
+    setStatusText("启动抓取…");
+    api("/api/library/refresh?mode=" + mode, {method: "POST"})
+      .then(() => pollStatus())
+      .catch(e => { setRefreshing(false); setStatusText("启动失败：" + e.message); });
+  };
+
+  const onSort = key => setSort(s => ({
+    key, dir: s.key === key && s.dir === "desc" ? "asc" : "desc",
+  }));
+  const arrow = k => sort.key === k ? (sort.dir === "asc" ? " ▲" : " ▼") : "";
+
+  let rows = items || [];
+  if (sort.key === "gold") {
+    rows = rows.slice().sort((a, b) => {
+      const va = a.gold_cost, vb = b.gold_cost;
+      if (va === null || va === undefined) return 1;
+      if (vb === null || vb === undefined) return -1;
+      return sort.dir === "asc" ? va - vb : vb - va;
+    });
+  }
+
+  return (
+    <div className="main">
+      <h2>信息库</h2>
+      <div className="meta-line">
+        物品中/英文名称、所属模块、Wiki 链接与 Currency Exchange（市场交易时每单位消耗的金币），支持中英文检索
+      </div>
+      <div className="toolbar">
+        <input type="text" placeholder="搜索名称 / 模块（中/英文）" value={search}
+          onChange={e => setSearch(e.target.value)} style={{width: 220}}/>
+        <select value={moduleSlug} onChange={e => setModuleSlug(e.target.value)}>
+          <option value="">全部模块</option>
+          {modules.map(m => <option key={m.slug} value={m.slug}>{m.name_zh}</option>)}
+        </select>
+        <button className="primary" disabled={refreshing} onClick={() => doRefresh("missing")}>
+          {refreshing && <span className="spinner"></span>}抓取 Wiki 信息
+        </button>
+        <button disabled={refreshing} title="重新抓取全部物品的 wiki 信息（耗时较长）"
+          onClick={() => doRefresh("all")}>全部重抓</button>
+        <span className="status-line">{statusText}</span>
+      </div>
+      {items === null ? <div className="empty">加载中…</div> :
+       rows.length === 0 ? <div className="empty">暂无数据，请先在经济页抓取模块数据</div> :
+      <table className="eco">
+        <thead>
+          <tr>
+            <th>名称</th>
+            <th>模块</th>
+            <th className="sortable" style={{textAlign: "right"}} onClick={() => onSort("gold")}>
+              Currency Exchange（金币）{arrow("gold")}</th>
+            <th>Wiki</th>
+            <th>更新时间</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(it => (
+            <tr key={it.item_id}>
+              <td>
+                <div className="name-main">
+                  {it.icon_path && <img src={it.icon_path} alt=""/>}
+                  <div>
+                    <div className="name-zh">{it.name_zh}</div>
+                    {it.name_en && <div className="name-en">{it.name_en}</div>}
+                  </div>
+                </div>
+              </td>
+              <td>
+                <div className="name-zh">{it.module_name_zh}</div>
+                <div className="name-en">{it.module_slug}</div>
+              </td>
+              <td className="vol">
+                {it.gold_cost !== null && it.gold_cost !== undefined
+                  ? fmtNum(it.gold_cost, 0) + " 金币" : "-"}
+              </td>
+              <td>
+                {it.wiki_slug &&
+                  <a className="wiki-link" target="_blank" rel="noreferrer"
+                     href={it.wiki_url || ("https://poe2db.tw/tw/" + it.wiki_slug)}>Wiki</a>}
+              </td>
+              <td style={{color: "#888"}}>{it.info_fetched_at || "-"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>}
+    </div>
+  );
+}
+
 function App() {
-  const [page, setPage] = useState("economy");  // economy | trade
+  const [page, setPage] = useState("economy");  // economy | trade | library
   const [seasons, setSeasons] = useState([]);
   const [seasonId, setSeasonId] = useState(null);
   const [modules, setModules] = useState([]);
@@ -762,9 +898,12 @@ function App() {
             <h4>工具</h4>
             <div className={"side-item" + (page === "trade" ? " active" : "")}
                  onClick={() => setPage("trade")}>交易助手</div>
+            <div className={"side-item" + (page === "library" ? " active" : "")}
+                 onClick={() => setPage("library")}>信息库</div>
           </div>
         </div>
         {page === "trade" ? <TradePage/> :
+         page === "library" ? <LibraryPage modules={modules}/> :
         <div className="main">
           <h2>{curModule ? curModule.name_zh : moduleSlug}</h2>
           <div className="meta-line">
