@@ -39,6 +39,13 @@
   /* 主区 */
   .main { flex: 1; padding: 16px 20px; overflow-x: auto; }
   .main h2 { margin: 0 0 4px; font-size: 18px; color: #eee; }
+  /* 经济页内容区左侧的模块列（页内视图切换，不属于菜单层级） */
+  .content-row { display: flex; gap: 18px; align-items: flex-start; }
+  .module-col { width: 170px; flex: none; border: 1px solid #2c2c2c; border-radius: 4px;
+                background: #181818; padding: 6px 0; }
+  .module-col h4 { margin: 4px 12px; color: #777; font-size: 12px; font-weight: normal; }
+  .module-col .side-item { padding: 5px 12px; }
+  .table-col { flex: 1; min-width: 0; }
   .meta-line { color: #999; margin-bottom: 12px; }
   .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
   select, input[type="text"], input[type="date"], input[type="time"], input[type="number"] {
@@ -1018,7 +1025,7 @@ function App() {
     <div>
       <div className="topnav">
         <div className={"item" + (page === "economy" ? " active" : "")}
-             onClick={() => setPage("economy")}>经济</div>
+             onClick={() => { setPage("economy"); setEcoView("module"); }}>经济</div>
         <div className="item disabled" title="暂未开放">策略</div>
         <div className={"item" + (page === "craft" ? " active" : "")}
              onClick={() => setPage("craft")}>做装</div>
@@ -1050,15 +1057,6 @@ function App() {
             ))}
           </div>
           <div className="half menu">
-            <div className="side-l2">经济模块</div>
-            {modules.map(m => (
-              <div key={m.slug}
-                   className={"side-item sub" + (ecoView === "module" && m.slug === moduleSlug ? " active" : "")}
-                   onClick={() => { setEcoView("module"); setModuleSlug(m.slug); }}>
-                {m.icon_path && <img src={m.icon_path} alt=""/>}
-                <span>{m.name_zh}</span>
-              </div>
-            ))}
             <div className="side-l2">工具</div>
             <div className={"side-item sub" + (ecoView === "trade" ? " active" : "")}
                  onClick={() => setEcoView("trade")}>交易助手</div>
@@ -1106,10 +1104,24 @@ function App() {
           <SeasonPanel onCreated={s => {
             api("/api/seasons").then(list => { setSeasons(list); setSeasonId(s.id); });
           }}/>
-          {data && data.items && data.items.length > 0 ?
-            <EcoTable items={data.items} refIcons={data.ref_icons || {}}
-                      search={search} sort={sort} onSort={onSort}/> :
-            <div className="empty">暂无数据，请点击刷新本模块抓取</div>}
+          <div className="content-row">
+            <div className="module-col">
+              <h4>经济模块</h4>
+              {modules.map(m => (
+                <div key={m.slug} className={"side-item" + (m.slug === moduleSlug ? " active" : "")}
+                     onClick={() => setModuleSlug(m.slug)}>
+                  {m.icon_path && <img src={m.icon_path} alt=""/>}
+                  <span>{m.name_zh}</span>
+                </div>
+              ))}
+            </div>
+            <div className="table-col">
+              {data && data.items && data.items.length > 0 ?
+                <EcoTable items={data.items} refIcons={data.ref_icons || {}}
+                          search={search} sort={sort} onSort={onSort}/> :
+                <div className="empty">暂无数据，请点击刷新本模块抓取</div>}
+            </div>
+          </div>
         </div>}
       </div>
     </div>
