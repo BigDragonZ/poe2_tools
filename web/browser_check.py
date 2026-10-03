@@ -171,14 +171,16 @@ def main():
         check("刷新后表格仍有数据", page.locator("table.eco tbody tr").count() > 0)
         page.screenshot(path=str(SHOTS_DIR / "04_after_refresh.png"), full_page=True)
 
-        # 14. 做装页：一级菜单可点击，二级菜单「戒指」→ 页面「稀有度」流程图
+        # 14. 做装页：一级菜单可点击，侧边栏二级菜单「戒指」→ 模块列页面「稀有度」流程图
         page.locator(".topnav .item", has_text="做装").click()
         page.wait_for_selector(".flow", timeout=5000)
         check("做装页加载流程图", page.locator(".flow").count() == 1)
-        check("做装二级菜单（戒指）",
-              page.locator(".module-col h4").all_inner_texts() == ["戒指"],
-              str(page.locator(".module-col h4").all_inner_texts()))
-        check("做装页面（稀有度）",
+        check("做装二级菜单在侧边栏（戒指）",
+              page.locator(".sidebar .half:not(.seasons) .side-item").all_inner_texts() == ["戒指"] and
+              page.locator(".sidebar .half.seasons").count() == 0,
+              str(page.locator(".sidebar .side-item").all_inner_texts()))
+        check("做装页面列（稀有度）",
+              page.locator(".module-col h4").inner_text() == "戒指" and
               page.locator(".module-col .side-item.active").inner_text() == "稀有度")
         check("流程图操作模块节点=3",
               page.locator(".flow-node.module").count() == 3,
@@ -188,12 +190,11 @@ def main():
               page.locator(".flow-node.warn").count() == 2 and
               page.locator(".flow-node.goal").count() == 1 and
               page.locator(".flow-node.done").count() == 1)
-        check("做装页无赛季侧边栏", page.locator(".sidebar").count() == 0)
         page.screenshot(path=str(SHOTS_DIR / "05_craft_ring_rarity.png"), full_page=True)
         # 返回经济页
         page.locator(".topnav .item", has_text="经济").click()
-        page.wait_for_selector(".sidebar", timeout=5000)
-        check("返回经济页侧边栏恢复", page.locator(".sidebar").count() == 1)
+        page.wait_for_selector(".sidebar .half.seasons", timeout=5000)
+        check("返回经济页赛季侧边栏恢复", page.locator(".sidebar .half.seasons").count() == 1)
 
         browser.close()
 

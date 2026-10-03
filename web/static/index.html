@@ -778,22 +778,20 @@ function RingRarityFlow() {
   );
 }
 
-function CraftPage() {
-  const [craftPage, setCraftPage] = useState("ring-rarity");
+function CraftPage({ section }) {
+  const sec = CRAFT_MENU.find(g => g.key === section) || CRAFT_MENU[0];
+  const [craftPage, setCraftPage] = useState(sec.pages[0].key);
+  const curPage = sec.pages.find(p => p.key === craftPage) || sec.pages[0];
   return (
     <div className="main">
-      <h2>做装</h2>
-      <div className="meta-line">做装流程记录：左侧选择装备部位与目标页面，右侧查看流程图</div>
+      <h2>{sec.label} · {curPage.label}</h2>
+      <div className="meta-line">做装流程记录：左侧边栏选择装备部位，模块列选择目标页面，右侧查看流程图</div>
       <div className="content-row">
         <div className="module-col">
-          {CRAFT_MENU.map(g => (
-            <div key={g.key}>
-              <h4>{g.label}</h4>
-              {g.pages.map(p => (
-                <div key={p.key} className={"side-item" + (p.key === craftPage ? " active" : "")}
-                     onClick={() => setCraftPage(p.key)}>{p.label}</div>
-              ))}
-            </div>
+          <h4>{sec.label}</h4>
+          {sec.pages.map(p => (
+            <div key={p.key} className={"side-item" + (p.key === craftPage ? " active" : "")}
+                 onClick={() => setCraftPage(p.key)}>{p.label}</div>
           ))}
         </div>
         <div className="table-col">
@@ -942,6 +940,7 @@ function LibraryPage({ modules }) {
 
 function App() {
   const [page, setPage] = useState("economy");  // economy | trade | library | craft
+  const [craftSection, setCraftSection] = useState("ring");  // 做装二级菜单：装备部位
   const [seasons, setSeasons] = useState([]);
   const [seasonId, setSeasonId] = useState(null);
   const [modules, setModules] = useState([]);
@@ -1035,8 +1034,17 @@ function App() {
         <div className="item disabled" title="暂未开放">开荒</div>
       </div>
       <div className="layout">
-        {page !== "craft" &&
         <div className="sidebar">
+          {page === "craft" ? (
+          <div className="half">
+            <h4>做装</h4>
+            {CRAFT_MENU.map(g => (
+              <div key={g.key} className={"side-item" + (g.key === craftSection ? " active" : "")}
+                   onClick={() => setCraftSection(g.key)}>{g.label}</div>
+            ))}
+          </div>
+          ) : (
+          <React.Fragment>
           <div className="half seasons">
             <h4>赛季</h4>
             {seasons.length === 0 && <div className="side-item" style={{color: "#666"}}>尚未录入赛季</div>}
@@ -1052,8 +1060,10 @@ function App() {
             <div className={"side-item" + (page === "library" ? " active" : "")}
                  onClick={() => setPage("library")}>信息库</div>
           </div>
-        </div>}
-        {page === "craft" ? <CraftPage/> :
+          </React.Fragment>
+          )}
+        </div>
+        {page === "craft" ? <CraftPage section={craftSection}/> :
          page === "trade" ? <TradePage/> :
          page === "library" ? <LibraryPage modules={modules}/> :
         <div className="main">
