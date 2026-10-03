@@ -80,6 +80,17 @@ def client_origin() -> Point | None:
     return Point(point.x, point.y)
 
 
+def client_size() -> Point | None:
+    """POE2 客户区宽高（x=宽, y=高）；窗口不存在时返回 None。"""
+    hwnd = _find_poe_hwnd()
+    if not hwnd:
+        return None
+    rect = wintypes.RECT()
+    if not user32.GetClientRect(hwnd, ctypes.byref(rect)):
+        return None
+    return Point(rect.right - rect.left, rect.bottom - rect.top)
+
+
 def client_to_screen(p: Point) -> Point | None:
     """客户区坐标 → 屏幕坐标；窗口不存在时返回 None。"""
     origin = client_origin()

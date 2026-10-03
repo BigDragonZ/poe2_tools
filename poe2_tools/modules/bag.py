@@ -58,11 +58,11 @@ class BagOrganizer(ToggleRunner):
             return
         p1 = self._first_point
         if pos.x <= p1.x or abs(pos.y - p1.y) > 10:
-            self.log("标定失败：第 2 格必须在第 1 格右侧同一行")
+            self.log("标定失败：第 2 格必须在第 1 格右侧同一行", "WARN")
             return
-        self.settings.cell_size = pos.x - p1.x
+        self.settings.general.sort.cell_size = pos.x - p1.x
         save_settings(self.settings)
-        self.log(f"标定成功，格子间距: {self.settings.cell_size} px")
+        self.log(f"标定成功，格子间距: {self.settings.general.sort.cell_size} px")
         if self._on_calibrated is not None:
             self._on_calibrated()
 
@@ -72,23 +72,24 @@ class BagOrganizer(ToggleRunner):
     def preflight(self) -> Point | None:
         if not window.is_poe_active():
             return None
-        if self.settings.cell_size <= 0:
-            self.log("请先标定：F3 指向第 1 格中心，F4 指向右侧相邻格中心")
+        if self.settings.general.sort.cell_size <= 0:
+            self.log("请先标定：F3 指向第 1 格中心，F4 指向右侧相邻格中心", "WARN")
             return None
         origin = window.cursor_client_pos()
         if origin is None:
-            self.log("未找到 POE2 窗口")
+            self.log("未找到 POE2 窗口", "ERROR")
             return None
         self.log("背包整理中，再按一次整理热键停止")
         return origin
 
     def _work(self, origin: Point) -> None:
+        sort = self.settings.general.sort
         aborted = batch_ops.run_dump(
             origin,
-            self.settings.cell_size,
-            self.settings.rows,
-            self.settings.cols,
-            self.settings.dump_interval_ms,
+            sort.cell_size,
+            sort.rows,
+            sort.cols,
+            sort.interval_ms,
             self._should_stop,
             window.is_poe_active,
             batch_ops.BatchDriver(),
@@ -97,12 +98,13 @@ class BagOrganizer(ToggleRunner):
 
     def run_once(self, origin: Point) -> bool:
         """供石碑/地图完成后调用一次整理；返回是否被中断。"""
+        sort = self.settings.general.sort
         return batch_ops.run_dump(
             origin,
-            self.settings.cell_size,
-            self.settings.rows,
-            self.settings.cols,
-            self.settings.dump_interval_ms,
+            sort.cell_size,
+            sort.rows,
+            sort.cols,
+            sort.interval_ms,
             self._should_stop,
             window.is_poe_active,
             batch_ops.BatchDriver(),

@@ -3,9 +3,19 @@
 """
 配置模型与 ini 读写（UTF-8）。
 
-集中定义桌面工具的全部配置：热键、背包网格、石碑/地图速点、
-货币坐标、战斗配置页与旋风页。读写通过 configparser，
-编码固定 UTF-8；坐标均为 POE2 客户区坐标（与 AHK 版约定一致）。
+集中定义桌面工具的全部配置，按功能分组为嵌套模型：
+- combat（[Combat]/[Cyclone]/[Profile1]/[Mapping] q6_roi）：战斗宏热键、激活配置、
+  旋风页与普通配置页按键策略、刷图 Q=6 检测区域
+- general.sort（[Sort]）：背包整理热键、网格行列、格距与批量间隔
+- general.tablet（[Tablet]）：石碑速点热键、货币、级别与批量间隔
+- general.map_click（[Map]）：地图速点热键与批量间隔
+- dev（[Dev]/[Measure]）：调试开关、日志级别、开发页测量坐标与框选范围
+- market_scan（[MarketScan]）：通货市场抓取各阶段延时（坐标复用 [Measure] 槽位）
+- currency（[Currency]）、bridge（[Bridge]）：货币坐标与 WebSocket 桥
+
+读写通过 configparser，编码固定 UTF-8；坐标均为 POE2 客户区坐标
+（与 AHK 版约定一致）。读取向后兼容旧段名（[General]/[Waystone]/[Bag]），
+保存只写新段名，首次保存后旧段自然消失。
 """
 
 from __future__ import annotations
@@ -30,8 +40,6 @@ CYCLONE_PROFILE = PROFILE_COUNT + 1  # 旋风配置页序号（跟在普通配�
 SKILL_KEYS = ["LButton", "RButton", "Space", "q", "w", "e", "r", "t"]
 # 旋风页鼠标按键
 CYC_KEYS = ["LButton", "MButton", "RButton"]
-# 旋风 Q/E 数字检测键
-CYC_DETECT_KEYS = ["q", "e"]
 
 MODE_DISABLED = "disabled"
 MODE_SPAM = "spam"
@@ -46,15 +54,8 @@ BATCH_JITTER = 0.3
 MIN_BATCH_INTERVAL_MS = 5
 MAX_BATCH_INTERVAL_MS = 5000
 DEF_DUMP_INTERVAL_MS = 30
-DEF_WAY_INTERVAL_MS = 50
-DEF_MAP_INTERVAL_MS = 50
-
-# 旋风 Q/E 数字检测
-CYC_DETECT_MS = 2000      # 检测间隔
-CYC_NUM_HW = 8            # 像素法检测区域半径（17×19）
-CYC_NUM_HH = 9
-CYC_TEMPLATE_RADIUS = 30  # 模板匹配搜索半径（标定点 ±30px）
-CYC_MATCH_THRESHOLD = 0.9  # OpenCV 模板匹配阈值（≈ FindText 容错 10%）
+DEF_WAY_INTERVAL_MS = 100
+DEF_MAP_INTERVAL_MS = 100
 
 # 货币：蜕变/增幅/富豪/崇高/混沌分三级，二级 = 一级 +70px，三级 = +140px（向右）
 CURRENCY_KEYS = ["trans", "aug", "regal", "ex", "chaos", "alch", "vaal", "whet", "scrap", "etch"]
@@ -67,9 +68,25 @@ TIER_SPACING = 70
 
 # 地图速点固定流程：[[货币, 每格点击次数], ...]，完成后触发一次背包整理
 MAP_PHASES = [["alch", 1], ["ex", 4], ["vaal", 1]]
+# 瓦尔腐化有动画：最小间隔兜底（毫秒），避免漏点
+MAP_MIN_INTERVAL_MS = {"vaal": 500}
 
 DEFAULT_ROWS = 5
 DEFAULT_COLS = 11
+
+# 开发页测量槽位：6 个测量坐标 + 6 个框选范围（开发阶段收集信息用）
+MEASURE_POINT_COUNT = 6
+MEASURE_RANGE_COUNT = 6
+
+# 通货市场抓取延时默认值（毫秒）：点击间隔 / 搜索下拉加载 / 市场面板刷新 /
+# 选中搜索结果后等待选中生效（偏保守：避免界面未刷新导致选错通货或截到旧结果）
+DEF_CLICK_DELAY_MS = 300
+DEF_SEARCH_LOAD_DELAY_MS = 1200
+DEF_UI_REFRESH_DELAY_MS = 800
+DEF_SELECT_DELAY_MS = 500
+
+# 日志级别白名单（非法值回退 INFO）
+LOG_LEVELS = ("DEBUG", "INFO", "WARN", "ERROR")
 
 # 紧急停止热键（固定，不可修改）
 EMERGENCY_HOTKEY = "f12"
@@ -96,34 +113,108 @@ class KeyConfig:
 
 
 @dataclass
-class Settings:
-    """桌面工具全部配置。"""
+class CombatSettings:
+    """战斗分组：战斗宏热键、激活配置页、旋风/普通配置页、刷图 Q=6 检测区域。"""
 
-    combat_hotkey: str = "f2"
-    dump_hotkey: str = "f1"
-    active_profile: int = 1
-    way_hotkey: str = "f6"
-    way_currency: str = "alch"
-    way_tier: int = 1
-    way_interval_ms: int = DEF_WAY_INTERVAL_MS
-    map_hotkey: str = "f7"
-    map_interval_ms: int = DEF_MAP_INTERVAL_MS
-    cell_size: int = 0
-    rows: int = DEFAULT_ROWS
-    cols: int = DEFAULT_COLS
-    dump_interval_ms: int = DEF_DUMP_INTERVAL_MS
-    cyclone: dict[str, KeyConfig] = field(default_factory=dict)
-    cyclone_coords: dict[str, Point] = field(default_factory=dict)
-    currency: dict[str, Point] = field(default_factory=dict)
-    profiles: list[dict[str, KeyConfig]] = field(default_factory=list)
-    bridge_enabled: bool = False
-    bridge_port: int = 8322
+    hotkey: str = "f2"
+    active_profile: int = 1  # 夹取 1~CYCLONE_PROFILE
+    cyclone: dict[str, KeyConfig] = field(default_factory=dict)   # [Cyclone]
+    profiles: list[dict[str, KeyConfig]] = field(default_factory=list)  # [Profile1]
+    q6_roi: tuple[int, int, int, int] | None = None  # [Mapping] q6_roi
 
     def __post_init__(self) -> None:
+        # cyclone/profiles 为空时填默认值（含默认键位策略）
         if not self.cyclone:
             self.cyclone = default_cyclone()
         if not self.profiles:
             self.profiles = default_profiles()
+
+
+@dataclass
+class SortSettings:
+    """背包整理分组（[Sort]）。"""
+
+    hotkey: str = "f1"
+    rows: int = DEFAULT_ROWS
+    cols: int = DEFAULT_COLS
+    interval_ms: int = DEF_DUMP_INTERVAL_MS
+    cell_size: int = 0
+
+
+@dataclass
+class TabletSettings:
+    """石碑速点分组（[Tablet]）。"""
+
+    hotkey: str = "f6"
+    currency: str = "alch"
+    tier: int = 1
+    interval_ms: int = DEF_WAY_INTERVAL_MS
+
+
+@dataclass
+class MapClickSettings:
+    """地图速点分组（[Map]）。"""
+
+    hotkey: str = "f7"
+    interval_ms: int = DEF_MAP_INTERVAL_MS
+
+
+@dataclass
+class GeneralSettings:
+    """通用功能分组：背包整理 + 石碑速点 + 地图速点。"""
+
+    sort: SortSettings = field(default_factory=SortSettings)
+    tablet: TabletSettings = field(default_factory=TabletSettings)
+    map_click: MapClickSettings = field(default_factory=MapClickSettings)
+
+
+@dataclass
+class DevSettings:
+    """开发分组（[Dev] + [Measure]）：调试开关、日志级别、测量数据。"""
+
+    debug: bool = False
+    log_level: str = "INFO"  # DEBUG/INFO/WARN/ERROR，非法回退 INFO
+    # 开发页测量数据：槽位号（1 起）→ 客户区坐标点 / 范围 (x1,y1,x2,y2)
+    measure_points: dict[int, Point] = field(default_factory=dict)
+    measure_ranges: dict[int, tuple[int, int, int, int]] = field(default_factory=dict)
+
+
+@dataclass
+class MarketScanSettings:
+    """通货市场抓取分组（[MarketScan]）：各阶段延时（毫秒）。
+
+    坐标复用开发页测量槽位（[Measure]）：point1~5 = 我需要的/我拥有的/搜索框/
+    市场比率按键/搜索结果首项，range3 = 交易比例与库存结果面板。
+    """
+
+    click_delay_ms: int = DEF_CLICK_DELAY_MS
+    search_load_delay_ms: int = DEF_SEARCH_LOAD_DELAY_MS
+    ui_refresh_delay_ms: int = DEF_UI_REFRESH_DELAY_MS
+    select_delay_ms: int = DEF_SELECT_DELAY_MS  # 选中搜索结果后的等待
+    hotkey: str = "f8"  # 比例测试启动热键（POE2 前台生效，游戏内手动触发抓取）
+    # 默认/指定通货批量抓取（交易模块子页）
+    hotkey_default: str = "f9"  # 默认通货（崇高/混沌/神圣）抓取热键
+    hotkey_custom: str = "f10"  # 指定通货抓取热键
+    custom_currency: str = ""  # 指定通货游戏内英文全名
+    # 结果面板截图偏移（修正框选偏差：实测需左移 10、下移 20）
+    range_offset_x: int = -10
+    range_offset_y: int = 20
+    # 交易页测试抓取的通货对（游戏内英文全名）
+    currency_a: str = "Divine Orb"
+    currency_b: str = "Chaos Orb"
+
+
+@dataclass
+class Settings:
+    """桌面工具全部配置（分组模型）。"""
+
+    combat: CombatSettings = field(default_factory=CombatSettings)
+    general: GeneralSettings = field(default_factory=GeneralSettings)
+    dev: DevSettings = field(default_factory=DevSettings)
+    market_scan: MarketScanSettings = field(default_factory=MarketScanSettings)
+    currency: dict[str, Point] = field(default_factory=dict)  # [Currency]
+    bridge_enabled: bool = False
+    bridge_port: int = 8322
 
 
 def default_key_config(key: str) -> KeyConfig:
@@ -157,6 +248,19 @@ def _clamp(value: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, value))
 
 
+def _read_value(
+    config: configparser.ConfigParser,
+    section: str,
+    key: str,
+    legacy: tuple[str, str] | None = None,
+) -> str:
+    """读取配置值（去空白）：新段新键优先，为空时回退旧段旧键。"""
+    raw = config.get(section, key, fallback="").strip()
+    if not raw and legacy is not None:
+        raw = config.get(legacy[0], legacy[1], fallback="").strip()
+    return raw
+
+
 def _read_mode(config: configparser.ConfigParser, section: str, key: str, default: str) -> str:
     mode = config.get(section, key, fallback=default).strip()
     return mode if mode in MODES else default
@@ -188,11 +292,28 @@ def _read_point(config: configparser.ConfigParser, section: str, key: str) -> Po
     return Point(_to_int(x, 0), _to_int(y, 0))
 
 
+def _read_range(config: configparser.ConfigParser, section: str, key: str) -> tuple[int, int, int, int] | None:
+    """读取 "x1,y1,x2,y2" 形式的范围；缺段或非法（非四点/x2<=x1/y2<=y1）返回 None。"""
+    raw = config.get(section, key, fallback="").strip()
+    if not raw:
+        return None
+    parts = [_to_int(p, 0) for p in raw.split(",")]
+    if len(parts) != 4 or parts[2] <= parts[0] or parts[3] <= parts[1]:
+        return None
+    return (parts[0], parts[1], parts[2], parts[3])
+
+
 # ============================================================
 # 加载 / 保存
 # ============================================================
 def load_settings(path: Path | None = None) -> Settings:
-    """从 ini 加载配置；文件缺失或字段非法时使用默认值。"""
+    """
+    从 ini 加载配置；文件缺失或字段非法时使用默认值。
+
+    向后兼容：新段（[Combat]/[Sort]/[Tablet]）的键为空时回退读旧段旧键
+    （[General] CombatHotkey/DumpHotkey/ActiveProfile、[Bag]、[Waystone]），
+    其余段（[Map]/[Cyclone]/[Profile1]/[Currency]/[Mapping]/[Measure]）段名不变。
+    """
     ini = path or INI_PATH
     config = configparser.ConfigParser()
     config.optionxform = str
@@ -201,94 +322,157 @@ def load_settings(path: Path | None = None) -> Settings:
             config.read_file(f)
 
     s = Settings()
-    s.combat_hotkey = config.get("General", "CombatHotkey", fallback=s.combat_hotkey).strip() or "f2"
-    s.dump_hotkey = config.get("General", "DumpHotkey", fallback=s.dump_hotkey).strip() or "f1"
-    s.active_profile = _clamp(
-        _to_int(config.get("General", "ActiveProfile", fallback="1"), 1), 1, CYCLONE_PROFILE
+
+    # 战斗分组：[Combat] ← 旧 [General] CombatHotkey/ActiveProfile
+    s.combat.hotkey = _read_value(config, "Combat", "Hotkey", ("General", "CombatHotkey")) or "f2"
+    s.combat.active_profile = _clamp(
+        _to_int(_read_value(config, "Combat", "ActiveProfile", ("General", "ActiveProfile")), 1),
+        1, CYCLONE_PROFILE,
     )
-    s.way_hotkey = config.get("Waystone", "Hotkey", fallback=s.way_hotkey).strip() or "f6"
-    way_currency = config.get("Waystone", "Currency", fallback=s.way_currency).strip()
-    s.way_currency = way_currency if way_currency in CURRENCY_KEYS else "alch"
-    s.way_tier = _clamp(_to_int(config.get("Waystone", "Tier", fallback="1"), 1), 1, 3)
-    s.way_interval_ms = _clamp(
-        _to_int(config.get("Waystone", "Interval", fallback=str(DEF_WAY_INTERVAL_MS)),
-                DEF_WAY_INTERVAL_MS),
-        MIN_BATCH_INTERVAL_MS, MAX_BATCH_INTERVAL_MS,
-    )
-    s.map_hotkey = config.get("Map", "Hotkey", fallback=s.map_hotkey).strip() or "f7"
-    s.map_interval_ms = _clamp(
-        _to_int(config.get("Map", "Interval", fallback=str(DEF_MAP_INTERVAL_MS)),
-                DEF_MAP_INTERVAL_MS),
-        MIN_BATCH_INTERVAL_MS, MAX_BATCH_INTERVAL_MS,
-    )
-    s.cell_size = _to_int(config.get("Bag", "CellSize", fallback="0"), 0)
-    s.rows = _clamp(_to_int(config.get("Bag", "Rows", fallback=str(DEFAULT_ROWS)), DEFAULT_ROWS), 1, 30)
-    s.cols = _clamp(_to_int(config.get("Bag", "Cols", fallback=str(DEFAULT_COLS)), DEFAULT_COLS), 1, 30)
-    s.dump_interval_ms = _clamp(
-        _to_int(config.get("Bag", "DumpInterval", fallback=str(DEF_DUMP_INTERVAL_MS)),
+
+    # 背包整理分组：[Sort] ← 旧 [General] DumpHotkey、旧 [Bag]
+    sort = s.general.sort
+    sort.hotkey = _read_value(config, "Sort", "Hotkey", ("General", "DumpHotkey")) or "f1"
+    sort.rows = _clamp(_to_int(_read_value(config, "Sort", "Rows", ("Bag", "Rows")),
+                               DEFAULT_ROWS), 1, 30)
+    sort.cols = _clamp(_to_int(_read_value(config, "Sort", "Cols", ("Bag", "Cols")),
+                               DEFAULT_COLS), 1, 30)
+    sort.interval_ms = _clamp(
+        _to_int(_read_value(config, "Sort", "Interval", ("Bag", "DumpInterval")),
                 DEF_DUMP_INTERVAL_MS),
         MIN_BATCH_INTERVAL_MS, MAX_BATCH_INTERVAL_MS,
     )
+    sort.cell_size = _to_int(_read_value(config, "Sort", "CellSize", ("Bag", "CellSize")), 0)
 
+    # 石碑速点分组：[Tablet] ← 旧 [Waystone]
+    tablet = s.general.tablet
+    tablet.hotkey = _read_value(config, "Tablet", "Hotkey", ("Waystone", "Hotkey")) or "f6"
+    tablet_currency = _read_value(config, "Tablet", "Currency", ("Waystone", "Currency")) or "alch"
+    tablet.currency = tablet_currency if tablet_currency in CURRENCY_KEYS else "alch"
+    tablet.tier = _clamp(_to_int(_read_value(config, "Tablet", "Tier", ("Waystone", "Tier")), 1), 1, 3)
+    tablet.interval_ms = _clamp(
+        _to_int(_read_value(config, "Tablet", "Interval", ("Waystone", "Interval")),
+                DEF_WAY_INTERVAL_MS),
+        MIN_BATCH_INTERVAL_MS, MAX_BATCH_INTERVAL_MS,
+    )
+
+    # 地图速点分组：[Map] 段名不变，直接读
+    map_click = s.general.map_click
+    map_click.hotkey = _read_value(config, "Map", "Hotkey") or "f7"
+    map_click.interval_ms = _clamp(
+        _to_int(_read_value(config, "Map", "Interval"), DEF_MAP_INTERVAL_MS),
+        MIN_BATCH_INTERVAL_MS, MAX_BATCH_INTERVAL_MS,
+    )
+
+    # 旋风页按键策略（段名不变）
     for key in CYC_KEYS:
-        s.cyclone[key] = _read_key_config(config, "Cyclone", key, default_key_config(key))
-    for key in CYC_DETECT_KEYS:
-        point = _read_point(config, "Cyclone", key)
-        if point is not None:
-            s.cyclone_coords[key] = point
+        s.combat.cyclone[key] = _read_key_config(config, "Cyclone", key, default_key_config(key))
 
+    # 货币坐标（段名不变，未标定槽位省略）
     for key in CURRENCY_KEYS:
         point = _read_point(config, "Currency", key)
         if point is not None:
             s.currency[key] = point
 
+    # 普通战斗配置页按键策略（段名不变）
     for i in range(PROFILE_COUNT):
         section = f"Profile{i + 1}"
         profile: dict[str, KeyConfig] = {}
         for key in SKILL_KEYS:
             profile[key] = _read_key_config(config, section, key, default_key_config(key))
-        s.profiles[i] = profile
+        s.combat.profiles[i] = profile
 
+    # WebSocket 桥（段名不变）
     s.bridge_enabled = config.get("Bridge", "Enabled", fallback="0").strip() in ("1", "true", "yes")
     s.bridge_port = _clamp(_to_int(config.get("Bridge", "Port", fallback="8322"), 8322), 1024, 65535)
+
+    # 刷图 Q=6 检测区域（段名不变，非法忽略）
+    q6_roi = config.get("Mapping", "q6_roi", fallback="").strip()
+    if q6_roi:
+        parts = [_to_int(p, 0) for p in q6_roi.split(",")]
+        if len(parts) == 4 and parts[2] > parts[0] and parts[3] > parts[1]:
+            s.combat.q6_roi = (parts[0], parts[1], parts[2], parts[3])
+
+    # 开发分组：[Dev] 调试开关与日志级别
+    s.dev.debug = config.get("Dev", "Debug", fallback="0").strip() in ("1", "true", "yes")
+    log_level = config.get("Dev", "LogLevel", fallback="INFO").strip().upper()
+    s.dev.log_level = log_level if log_level in LOG_LEVELS else "INFO"
+
+    # 开发页测量数据（段名不变）
+    for i in range(1, MEASURE_POINT_COUNT + 1):
+        point = _read_point(config, "Measure", f"point{i}")
+        if point is not None:
+            s.dev.measure_points[i] = point
+    for i in range(1, MEASURE_RANGE_COUNT + 1):
+        rect = _read_range(config, "Measure", f"range{i}")
+        if rect is not None:
+            s.dev.measure_ranges[i] = rect
+
+    # 通货市场抓取延时（[MarketScan]，夹取 0~60000ms）
+    ms = s.market_scan
+    ms.click_delay_ms = _clamp(
+        _to_int(config.get("MarketScan", "ClickDelay", fallback=str(DEF_CLICK_DELAY_MS)),
+                DEF_CLICK_DELAY_MS), 0, 60000)
+    ms.search_load_delay_ms = _clamp(
+        _to_int(config.get("MarketScan", "SearchLoadDelay", fallback=str(DEF_SEARCH_LOAD_DELAY_MS)),
+                DEF_SEARCH_LOAD_DELAY_MS), 0, 60000)
+    ms.ui_refresh_delay_ms = _clamp(
+        _to_int(config.get("MarketScan", "UiRefreshDelay", fallback=str(DEF_UI_REFRESH_DELAY_MS)),
+                DEF_UI_REFRESH_DELAY_MS), 0, 60000)
+    ms.select_delay_ms = _clamp(
+        _to_int(config.get("MarketScan", "SelectDelay", fallback=str(DEF_SELECT_DELAY_MS)),
+                DEF_SELECT_DELAY_MS), 0, 60000)
+    ms.currency_a = config.get("MarketScan", "CurrencyA", fallback="Divine Orb").strip() or "Divine Orb"
+    ms.currency_b = config.get("MarketScan", "CurrencyB", fallback="Chaos Orb").strip() or "Chaos Orb"
+    ms.hotkey = config.get("MarketScan", "Hotkey", fallback="f8").strip().lower() or "f8"
+    ms.hotkey_default = (
+        config.get("MarketScan", "HotkeyDefault", fallback="f9").strip().lower() or "f9"
+    )
+    ms.hotkey_custom = (
+        config.get("MarketScan", "HotkeyCustom", fallback="f10").strip().lower() or "f10"
+    )
+    ms.custom_currency = config.get("MarketScan", "CustomCurrency", fallback="").strip()
+    ms.range_offset_x = _clamp(
+        _to_int(config.get("MarketScan", "RangeOffsetX", fallback="-10"), -10), -500, 500)
+    ms.range_offset_y = _clamp(
+        _to_int(config.get("MarketScan", "RangeOffsetY", fallback="20"), 20), -500, 500)
     return s
 
 
 def save_settings(s: Settings, path: Path | None = None) -> None:
-    """把配置写入 ini（UTF-8）。"""
+    """把配置写入 ini（UTF-8）。只写新段名，全量重写（未标定槽位省略）。"""
     ini = path or INI_PATH
     config = configparser.ConfigParser()
     config.optionxform = str
 
-    config["General"] = {
-        "CombatHotkey": s.combat_hotkey,
-        "DumpHotkey": s.dump_hotkey,
-        "ActiveProfile": str(s.active_profile),
+    config["Combat"] = {
+        "Hotkey": s.combat.hotkey,
+        "ActiveProfile": str(s.combat.active_profile),
     }
-    config["Waystone"] = {
-        "Hotkey": s.way_hotkey,
-        "Currency": s.way_currency,
-        "Tier": str(s.way_tier),
-        "Interval": str(s.way_interval_ms),
+    sort = s.general.sort
+    config["Sort"] = {
+        "Hotkey": sort.hotkey,
+        "Rows": str(sort.rows),
+        "Cols": str(sort.cols),
+        "Interval": str(sort.interval_ms),
+        "CellSize": str(sort.cell_size),
     }
-    config["Map"] = {"Hotkey": s.map_hotkey, "Interval": str(s.map_interval_ms)}
-    config["Bag"] = {
-        "CellSize": str(s.cell_size),
-        "Rows": str(s.rows),
-        "Cols": str(s.cols),
-        "DumpInterval": str(s.dump_interval_ms),
+    tablet = s.general.tablet
+    config["Tablet"] = {
+        "Hotkey": tablet.hotkey,
+        "Currency": tablet.currency,
+        "Tier": str(tablet.tier),
+        "Interval": str(tablet.interval_ms),
     }
+    map_click = s.general.map_click
+    config["Map"] = {"Hotkey": map_click.hotkey, "Interval": str(map_click.interval_ms)}
+
     cyclone_section: dict[str, str] = {}
     for key in CYC_KEYS:
-        c = s.cyclone.get(key, default_key_config(key))
+        c = s.combat.cyclone.get(key, default_key_config(key))
         cyclone_section[f"{key}_mode"] = c.mode
         cyclone_section[f"{key}_interval"] = str(c.interval_ms)
         cyclone_section[f"{key}_jitter"] = str(c.jitter_ms)
-    for key in CYC_DETECT_KEYS:
-        if key in s.cyclone_coords:
-            p = s.cyclone_coords[key]
-            cyclone_section[f"{key}_x"] = str(p.x)
-            cyclone_section[f"{key}_y"] = str(p.y)
     config["Cyclone"] = cyclone_section
 
     currency_section: dict[str, str] = {}
@@ -302,13 +486,44 @@ def save_settings(s: Settings, path: Path | None = None) -> None:
     for i in range(PROFILE_COUNT):
         section: dict[str, str] = {}
         for key in SKILL_KEYS:
-            c = s.profiles[i].get(key, default_key_config(key))
+            c = s.combat.profiles[i].get(key, default_key_config(key))
             section[f"{key}_mode"] = c.mode
             section[f"{key}_interval"] = str(c.interval_ms)
             section[f"{key}_jitter"] = str(c.jitter_ms)
         config[f"Profile{i + 1}"] = section
 
     config["Bridge"] = {"Enabled": "1" if s.bridge_enabled else "0", "Port": str(s.bridge_port)}
+
+    mapping_section: dict[str, str] = {}
+    if s.combat.q6_roi is not None:
+        mapping_section["q6_roi"] = ",".join(str(v) for v in s.combat.q6_roi)
+    config["Mapping"] = mapping_section
+
+    measure_section: dict[str, str] = {}
+    for i, p in sorted(s.dev.measure_points.items()):
+        measure_section[f"point{i}_x"] = str(p.x)
+        measure_section[f"point{i}_y"] = str(p.y)
+    for i, rect in sorted(s.dev.measure_ranges.items()):
+        measure_section[f"range{i}"] = ",".join(str(v) for v in rect)
+    config["Measure"] = measure_section
+
+    config["Dev"] = {"Debug": "1" if s.dev.debug else "0", "LogLevel": s.dev.log_level}
+
+    ms = s.market_scan
+    config["MarketScan"] = {
+        "ClickDelay": str(ms.click_delay_ms),
+        "SearchLoadDelay": str(ms.search_load_delay_ms),
+        "UiRefreshDelay": str(ms.ui_refresh_delay_ms),
+        "SelectDelay": str(ms.select_delay_ms),
+        "Hotkey": ms.hotkey,
+        "HotkeyDefault": ms.hotkey_default,
+        "HotkeyCustom": ms.hotkey_custom,
+        "CustomCurrency": ms.custom_currency,
+        "RangeOffsetX": str(ms.range_offset_x),
+        "RangeOffsetY": str(ms.range_offset_y),
+        "CurrencyA": ms.currency_a,
+        "CurrencyB": ms.currency_b,
+    }
 
     ini.parent.mkdir(parents=True, exist_ok=True)
     with open(ini, "w", encoding="utf-8") as f:

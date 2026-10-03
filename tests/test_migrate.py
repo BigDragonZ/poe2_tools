@@ -50,23 +50,21 @@ def test_decode_pure_utf8() -> None:
 
 def test_migrate_general_and_bag() -> None:
     s = migrate_ahk_config(_build_ahk_ini())
-    assert s.combat_hotkey.lower() == "f2"
-    assert s.active_profile == 5
-    assert s.cell_size == 70
-    assert s.dump_interval_ms == 20
+    assert s.combat.hotkey.lower() == "f2"
+    assert s.combat.active_profile == 5
+    assert s.general.sort.cell_size == 70
+    assert s.general.sort.interval_ms == 20
 
 
-def test_migrate_currency_and_cyclone_coords() -> None:
+def test_migrate_currency_coords() -> None:
     s = migrate_ahk_config(_build_ahk_ini())
     assert s.currency["alch"] == Point(352, 238)
     assert s.currency["ex"] == Point(81, 505)
-    assert s.cyclone_coords["q"] == Point(1918, 1375)
-    assert s.cyclone_coords["e"] == Point(1989, 1371)
 
 
 def test_migrate_mode_mapping() -> None:
     s = migrate_ahk_config(_build_ahk_ini())
-    profile1 = s.profiles[0]
+    profile1 = s.combat.profiles[0]
     assert profile1["LButton"].mode == sm.MODE_SPAM
     assert profile1["RButton"].mode == sm.MODE_DISABLED
     q = profile1["q"]
@@ -78,22 +76,22 @@ def test_migrate_mode_mapping() -> None:
 def test_migrate_random_switch_converts_to_jitter_ms() -> None:
     s = migrate_ahk_config(_build_ahk_ini())
     # AHK _random=1（±15% 比例）折算为等效毫秒：100ms → 15ms
-    assert s.profiles[0]["LButton"].jitter_ms == 15
-    assert s.cyclone["LButton"].jitter_ms == 15
+    assert s.combat.profiles[0]["LButton"].jitter_ms == 15
+    assert s.combat.cyclone["LButton"].jitter_ms == 15
 
 
 def test_migrate_cyclone_mouse_keys() -> None:
     s = migrate_ahk_config(_build_ahk_ini())
-    assert s.cyclone["LButton"].mode == sm.MODE_SPAM
-    assert s.cyclone["MButton"].mode == sm.MODE_DISABLED
+    assert s.combat.cyclone["LButton"].mode == sm.MODE_SPAM
+    assert s.combat.cyclone["MButton"].mode == sm.MODE_DISABLED
 
 
 def test_migrate_migrates_single_profile() -> None:
     s = migrate_ahk_config(_build_ahk_ini())
     # 只保留一个配置页，配置1 的数据迁移到 profiles[0]
-    assert len(s.profiles) == 1
-    assert s.profiles[0]["LButton"].mode == sm.MODE_SPAM
-    assert s.profiles[0]["q"].mode == sm.MODE_SPAM
+    assert len(s.combat.profiles) == 1
+    assert s.combat.profiles[0]["LButton"].mode == sm.MODE_SPAM
+    assert s.combat.profiles[0]["q"].mode == sm.MODE_SPAM
 
 
 # ============================================================
@@ -104,24 +102,20 @@ def test_merge_coords_fills_missing() -> None:
     synced = merge_ahk_coords(s, _build_ahk_ini())
     assert s.currency["alch"] == Point(352, 238)
     assert s.currency["ex"] == Point(81, 505)
-    assert s.cyclone_coords["q"] == Point(1918, 1375)
-    assert "currency:alch" in synced and "cyclone:q" in synced
-    assert "cyclone:e" in synced
+    assert "currency:alch" in synced and "currency:ex" in synced
 
 
 def test_merge_coords_keeps_existing() -> None:
     s = Settings()
     s.currency["alch"] = Point(999, 999)
-    s.cyclone_coords["q"] = Point(1, 1)
     synced = merge_ahk_coords(s, _build_ahk_ini())
     assert s.currency["alch"] == Point(999, 999)  # 已标定的不覆盖
-    assert s.cyclone_coords["q"] == Point(1, 1)
-    assert "currency:alch" not in synced and "cyclone:q" not in synced
+    assert "currency:alch" not in synced
     assert s.currency["ex"] == Point(81, 505)  # 缺失的仍填充
 
 
 def test_merge_coords_does_not_touch_other_settings() -> None:
     s = Settings()
-    s.cell_size = 72
+    s.general.sort.cell_size = 72
     merge_ahk_coords(s, _build_ahk_ini())
-    assert s.cell_size == 72  # AHK 里 CellSize=70，合并不覆盖
+    assert s.general.sort.cell_size == 72  # AHK 里 CellSize=70，合并不覆盖

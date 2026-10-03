@@ -27,10 +27,10 @@ def test_macro_refuses_when_poe_inactive(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_macro_refuses_when_all_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(combat_module.window, "is_poe_active", lambda: True)
     s = Settings()
-    for profile in s.profiles:
+    for profile in s.combat.profiles:
         for key in profile:
             profile[key] = KeyConfig(sm.MODE_DISABLED)
-    s.active_profile = 1
+    s.combat.active_profile = 1
     macro = CombatMacro(s)
     macro.start()
     assert not macro.active
@@ -38,20 +38,20 @@ def test_macro_refuses_when_all_disabled(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_current_config_profile_selection() -> None:
     s = Settings()
-    s.active_profile = 1
+    s.combat.active_profile = 1
     macro = CombatMacro(s)
     keys, cfg = macro._current_config()
     assert keys == sm.SKILL_KEYS
-    assert cfg is s.profiles[0]
+    assert cfg is s.combat.profiles[0]
 
 
 def test_current_config_cyclone_selection() -> None:
     s = Settings()
-    s.active_profile = sm.CYCLONE_PROFILE
+    s.combat.active_profile = sm.CYCLONE_PROFILE
     macro = CombatMacro(s)
     keys, cfg = macro._current_config()
     assert keys == sm.CYC_KEYS
-    assert cfg is s.cyclone
+    assert cfg is s.combat.cyclone
 
 
 # ============================================================

@@ -52,7 +52,8 @@ def main():
 
         # 2. 顶部一级菜单
         nav_texts = page.locator(".topnav .item").all_inner_texts()
-        check("一级菜单（经济/策略/做装/开荒）", nav_texts == ["经济", "策略", "做装", "开荒"],
+        check("一级菜单（经济/交易/策略/做装/开荒）",
+              nav_texts == ["经济", "交易", "策略", "做装", "开荒"],
               str(nav_texts))
 
         # 3. 经济模块为单页：14 个模块在内容区页内模块列切换，不拆分为侧边栏页面
@@ -63,8 +64,8 @@ def main():
               page.locator(".sidebar .module-col").count() == 0)
         l2_texts = page.locator(".sidebar .side-l2").all_inner_texts()
         check("经济页侧边栏二级菜单（工具）", l2_texts == ["工具"], str(l2_texts))
-        check("工具下嵌套三级页面（交易助手/信息库）",
-              page.locator(".sidebar .side-item.sub").all_inner_texts() == ["交易助手", "信息库"],
+        check("工具下嵌套三级页面（信息库）",
+              page.locator(".sidebar .side-item.sub").all_inner_texts() == ["信息库"],
               str(page.locator(".sidebar .side-item.sub").all_inner_texts()))
 
         # 4. 赛季列表存在且默认选中
@@ -86,7 +87,7 @@ def main():
               page.locator("table.eco .name-main img").first.get_attribute("src").startswith("/icons/"))
         check("英文名称显示", page.locator("table.eco .name-en").first.inner_text() != "")
         wiki_href = page.locator("table.eco .wiki-link").first.get_attribute("href")
-        check("Wiki 链接指向原站", wiki_href.startswith("https://poe2db.tw/tw/"), wiki_href)
+        check("Wiki 链接指向原站", wiki_href.startswith("https://poe2db.tw/cn/"), wiki_href)
         check("走势 SVG 重绘", page.locator("table.eco svg path").count() > 0,
               f"{page.locator('table.eco svg path').count()} 个")
 
@@ -183,7 +184,31 @@ def main():
         page.locator(".topnav .item", has_text="经济").click()
         page.wait_for_selector("table.eco tbody tr", timeout=10000)
 
-        # 15. 做装页：一级菜单可点击，侧边栏二级菜单「戒指」下嵌套三级菜单「稀有度」，内容区直接展示流程图
+        # 15. 交易一级菜单：二级菜单「市场比例」下嵌套 默认/指定/自动 三级页面，只读展示无手动录入
+        page.locator(".topnav .item", has_text="交易").click()
+        page.wait_for_selector(".main h2", timeout=5000)
+        check("交易侧边栏二级菜单（市场比例）",
+              page.locator(".sidebar .side-l2").all_inner_texts() == ["市场比例"],
+              str(page.locator(".sidebar .side-l2").all_inner_texts()))
+        check("交易三级页面（默认/指定/自动）",
+              page.locator(".sidebar .side-item.sub").all_inner_texts() == ["默认", "指定", "自动"],
+              str(page.locator(".sidebar .side-item.sub").all_inner_texts()))
+        check("默认进入「交易 · 默认」页",
+              page.locator(".main h2").inner_text() == "交易 · 默认")
+        check("交易页无手动录入入口（仅 VE 三个费率输入框）",
+              page.locator(".main button", has_text="录入").count() == 0 and
+              page.locator(".main input[type='number']").count() == 3)
+        page.screenshot(path=str(SHOTS_DIR / "06_trade_default.png"), full_page=True)
+        page.locator(".sidebar .side-item.sub", has_text="指定").click()
+        page.wait_for_timeout(500)
+        check("三级页面「指定」可达", page.locator(".main h2").inner_text() == "交易 · 指定")
+        page.locator(".sidebar .side-item.sub", has_text="自动").click()
+        page.wait_for_timeout(500)
+        check("三级页面「自动」可达", page.locator(".main h2").inner_text() == "交易 · 自动")
+        page.locator(".topnav .item", has_text="经济").click()
+        page.wait_for_selector(".sidebar .half.seasons", timeout=5000)
+
+        # 16. 做装页：一级菜单可点击，侧边栏二级菜单「戒指」下嵌套三级菜单「稀有度」，内容区直接展示流程图
         page.locator(".topnav .item", has_text="做装").click()
         page.wait_for_selector(".flow", timeout=5000)
         check("做装页加载流程图", page.locator(".flow").count() == 1)
@@ -213,13 +238,13 @@ def main():
 
         browser.close()
 
-    # 16. 清理测试赛季
+    # 17. 清理测试赛季
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute("DELETE FROM seasons WHERE name = 'UI自动化测试赛季'")
         conn.commit()
         check("清理测试赛季", cur.rowcount == 1)
 
-    # 17. 浏览器控制台无报错
+    # 18. 浏览器控制台无报错
     real_errors = [e for e in console_errors if "favicon" not in e]
     check("浏览器控制台无报错", not real_errors, str(real_errors[:3]))
 

@@ -9,27 +9,27 @@ import time
 import requests
 from bs4 import BeautifulSoup
 
-BASE_URL = "https://poe2db.tw/tw/"
+BASE_URL = "https://poe2db.tw/cn/"
 USER_AGENT = "poe2-economy-recorder/0.1 (+personal use)"
 REQUEST_INTERVAL = 1.0  # 礼貌性限速：请求间隔 >= 1 秒
 REQUEST_TIMEOUT = 30
 
-# 14 个经济模块：slug -> 繁体名
+# 14 个经济模块：slug -> 简体名（与 poe2db.tw/cn 页面卡片一致）
 MODULES = [
-    ("Economy_Currency", "通貨"),
+    ("Economy_Currency", "通货"),
     ("Economy_Fragments", "碎片"),
-    ("Economy_Ritual", "祭祀"),
-    ("Economy_Essences", "精髓"),
-    ("Economy_Breach", "裂痕聯盟"),
-    ("Economy_Delirium", "譫妄異域"),
-    ("Economy_Expedition", "死境探險"),
+    ("Economy_Ritual", "驱灵仪式"),
+    ("Economy_Essences", "精华"),
+    ("Economy_Breach", "裂隙"),
+    ("Economy_Delirium", "惊悸迷雾"),
+    ("Economy_Expedition", "先祖秘藏"),
     ("Economy_Runes", "符文"),
-    ("Economy_Soul_Cores", "靈魂核心"),
-    ("Economy_Idols", "魔偶"),
-    ("Economy_Uncut_Gems", "未切割的寶石"),
-    ("Economy_Abyss", "深淵"),
-    ("Economy_Gems", "寶石"),
-    ("Economy_Atziris_Temple", "阿茲里的神廟"),
+    ("Economy_Soul_Cores", "灵核"),
+    ("Economy_Idols", "雕像"),
+    ("Economy_Uncut_Gems", "未切割的宝石"),
+    ("Economy_Abyss", "深渊"),
+    ("Economy_Gems", "宝石"),
+    ("Economy_Atziris_Temple", "阿兹里神庙"),
 ]
 MODULE_SLUGS = [slug for slug, _ in MODULES]
 MODULE_NAMES = dict(MODULES)

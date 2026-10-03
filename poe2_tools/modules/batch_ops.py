@@ -98,7 +98,7 @@ def apply_currency_to_bag(
     driver: BatchDriver,
 ) -> bool:
     """
-    货币批量应用核心：Shift 按住 → 货币坐标右键选中 → 背包每格左键 clicksPerCell 次。
+    货币批量应用核心：Shift 按住 → 货币坐标右键选中 → 背包逐格左键 clicksPerCell 次。
     返回是否被中断。
     """
     driver.key_down("Shift")

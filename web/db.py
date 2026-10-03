@@ -69,6 +69,8 @@ CREATE TABLE IF NOT EXISTS trade_rates (
     amount_from REAL NOT NULL,
     amount_to REAL NOT NULL,
     side TEXT NOT NULL DEFAULT 'sell',
+    source TEXT NOT NULL DEFAULT 'manual',
+    category TEXT NOT NULL DEFAULT 'default',
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS item_info (
@@ -103,6 +105,15 @@ def init_db(db_path=None):
         cols = [r["name"] for r in conn.execute("PRAGMA table_info(trade_rates)")]
         if "side" not in cols:
             conn.execute("ALTER TABLE trade_rates ADD COLUMN side TEXT NOT NULL DEFAULT 'sell'")
+        if "source" not in cols:
+            conn.execute("ALTER TABLE trade_rates ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
+        if "category" not in cols:
+            conn.execute(
+                "ALTER TABLE trade_rates ADD COLUMN category TEXT NOT NULL DEFAULT 'default'")
+            # 存量数据回填：涉及物品单位的记录归入「指定」，其余为「默认」
+            conn.execute(
+                "UPDATE trade_rates SET category = 'custom' "
+                "WHERE from_unit LIKE 'item:%' OR to_unit LIKE 'item:%'")
 
 
 def _now():
@@ -316,40 +327,78 @@ def latest_fetch_time_by_module(db_path=None):
 
 # ---------- 交易汇率 ----------
 
-def add_trade_rate(from_unit, to_unit, amount_from, amount_to, side="sell", db_path=None):
-    """录入一条手动观测的兑换比例（from_unit * amount_from = to_unit * amount_to）。
+# 交易菜单页面类别：默认通货 / 指定 / 自动（对应游玩工具交易模块同名子标签的输出）
+TRADE_CATEGORIES = ("default", "custom", "auto")
+
+
+def add_trade_rate(from_unit, to_unit, amount_from, amount_to, side="sell",
+                   source="manual", category="default", db_path=None):
+    """录入一条兑换比例（from_unit * amount_from = to_unit * amount_to）。
 
     side：buy = 市场买入（需付金币），sell = 卖出（免金币）。
+    source：manual = 手动录入（页面已移除入口，保留接口），auto = 桌面端市场抓取同步。
+    category：所属交易页（default 默认 / custom 指定 / auto 自动）。
     """
     with _DB_LOCK, _connect(db_path) as conn:
         cur = conn.execute(
-            "INSERT INTO trade_rates(from_unit, to_unit, amount_from, amount_to, side, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
-            (from_unit, to_unit, amount_from, amount_to, side, _now()),
+            "INSERT INTO trade_rates(from_unit, to_unit, amount_from, amount_to, side, source,"
+            " category, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (from_unit, to_unit, amount_from, amount_to, side, source, category, _now()),
         )
         return cur.lastrowid
 
 
-def list_trade_rates(limit=50, db_path=None):
-    """最近的汇率记录（新→旧）。"""
+def replace_auto_trade_rates(rates, category="default", db_path=None):
+    """整批写入桌面端抓取的汇率：同类别同方向（from/to/side）的旧自动记录先删再插。
+
+    实现「每次只保留最近一次抓取比例」。
+    rates 元素：{"from_unit", "to_unit", "amount_from", "amount_to", "side"}。
+    返回写入条数。
+    """
+    with _DB_LOCK, _connect(db_path) as conn:
+        for r in rates:
+            conn.execute(
+                "DELETE FROM trade_rates WHERE source = 'auto' AND category = ?"
+                " AND from_unit = ? AND to_unit = ? AND side = ?",
+                (category, r["from_unit"], r["to_unit"], r["side"]),
+            )
+            conn.execute(
+                "INSERT INTO trade_rates(from_unit, to_unit, amount_from, amount_to, side,"
+                " source, category, created_at) VALUES (?, ?, ?, ?, ?, 'auto', ?, ?)",
+                (r["from_unit"], r["to_unit"], r["amount_from"], r["amount_to"],
+                 r["side"], category, _now()),
+            )
+        return len(rates)
+
+
+def list_trade_rates(limit=50, category=None, db_path=None):
+    """最近的汇率记录（新→旧）；category 非空时只取该类别的记录。"""
+    sql = "SELECT * FROM trade_rates"
+    params: list = []
+    if category:
+        sql += " WHERE category = ?"
+        params.append(category)
+    sql += " ORDER BY id DESC LIMIT ?"
+    params.append(limit)
     with _connect(db_path) as conn:
-        rows = conn.execute(
-            "SELECT * FROM trade_rates ORDER BY id DESC LIMIT ?", (limit,)
-        ).fetchall()
+        rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
 
-def latest_trade_rates(db_path=None):
-    """每个 (from_unit, to_unit, side) 方向最新一条汇率。"""
+def latest_trade_rates(category=None, db_path=None):
+    """每个 (from_unit, to_unit, side) 方向最新一条汇率；category 非空时只取该类别。"""
+    sql = """SELECT t.* FROM trade_rates t
+             WHERE t.id = (
+                 SELECT MAX(t2.id) FROM trade_rates t2
+                 WHERE t2.from_unit = t.from_unit AND t2.to_unit = t.to_unit
+                   AND t2.side = t.side)"""
+    params: list = []
+    if category:
+        sql += " AND t.category = ?"
+        params.append(category)
+    sql += " ORDER BY t.id DESC"
     with _connect(db_path) as conn:
-        rows = conn.execute(
-            """SELECT t.* FROM trade_rates t
-               WHERE t.id = (
-                   SELECT MAX(t2.id) FROM trade_rates t2
-                   WHERE t2.from_unit = t.from_unit AND t2.to_unit = t.to_unit
-                     AND t2.side = t.side)
-               ORDER BY t.id DESC"""
-        ).fetchall()
+        rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
 
@@ -357,15 +406,6 @@ def delete_trade_rate(rate_id, db_path=None):
     with _DB_LOCK, _connect(db_path) as conn:
         cur = conn.execute("DELETE FROM trade_rates WHERE id = ?", (rate_id,))
         return cur.rowcount > 0
-
-
-def list_item_names(limit=500, db_path=None):
-    """已知物品名（供交易页物品输入联想）。"""
-    with _connect(db_path) as conn:
-        rows = conn.execute(
-            "SELECT DISTINCT name_zh FROM items ORDER BY name_zh LIMIT ?", (limit,)
-        ).fetchall()
-        return [r["name_zh"] for r in rows]
 
 
 def get_item_icons_by_names(names, db_path=None):

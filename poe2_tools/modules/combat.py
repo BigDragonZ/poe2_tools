@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-战斗宏：多按键连点/按住 + 旋风 Q/E 数字检测触发。
+战斗宏：多按键连点/按住。
 
 - 10ms 节拍调度循环 + SpamScheduler 到期时间驱动，间隔精确不漂移
 - 连点间隔带毫秒级随机附加（0~jitter_ms，每键可配）
 - 按住不放键在启动时按下、停止/失焦/急停时全部释放
-- 旋风页（active_profile == CYCLONE_PROFILE）：鼠标三键走同一调度，
-  Q/E 由 CycloneWatcher 后台线程做数字检测、边沿触发按键
+- 旋风页（active_profile == CYCLONE_PROFILE）：鼠标三键走同一调度
 - POE2 窗口失焦自动停止
 """
 
@@ -15,26 +14,21 @@ from __future__ import annotations
 
 import threading
 import time
-from pathlib import Path
 
 from poe2_tools.config.settings import (
     CYCLONE_PROFILE,
-    CYC_DETECT_KEYS,
     MODE_HOLD,
     MODE_SPAM,
     KeyConfig,
     Settings,
 )
 from poe2_tools.core import input as core_input
-from poe2_tools.core import vision, window
+from poe2_tools.core import window
 from poe2_tools.core.scheduler import SpamScheduler
 from poe2_tools.modules.base import Logger
 
 # 调度节拍（秒）
 LOOP_TICK = 0.01
-
-# 旋风 Q/E 模板图片目录（由界面「截图」按钮生成）
-TEMPLATES_DIR = Path(__file__).resolve().parent.parent.parent / "templates"
 
 
 class CombatMacro:
@@ -47,13 +41,12 @@ class CombatMacro:
         self._stop = threading.Event()
         self._scheduler = SpamScheduler()
         self._held: list[str] = []
-        self._watcher: vision.CycloneWatcher | None = None
         self.active = False
 
-    def log(self, message: str) -> None:
+    def log(self, message: str, level: str = "INFO") -> None:
         print(message)
         if self._logger is not None:
-            self._logger(message)
+            self._logger(message, level)
 
     # --------------------------------------------------------
     # 启停
@@ -72,12 +65,12 @@ class CombatMacro:
             if self.active:
                 return
             if not window.is_poe_active():
-                self.log("POE2 窗口未激活，无法启动战斗宏")
+                self.log("POE2 窗口未激活，无法启动战斗宏", "WARN")
                 return
             keys, cfg = self._current_config()
             enabled = {k: c for k, c in cfg.items() if c.mode != "disabled"}
-            if not enabled and not self._is_cyclone():
-                self.log("所有按键均为禁用状态，请先配置战斗设置")
+            if not enabled:
+                self.log("所有按键均为禁用状态，请先配置战斗设置", "WARN")
                 return
 
             self._held = []
@@ -89,8 +82,6 @@ class CombatMacro:
                 {k: c.interval_ms for k, c in cfg.items() if c.mode == MODE_SPAM},
                 time.monotonic(),
             )
-            if self._is_cyclone():
-                self._start_watcher()
             self.active = True
             self._stop.clear()
 
@@ -100,9 +91,6 @@ class CombatMacro:
     def stop(self) -> None:
         """停止战斗宏并释放所有按住键。"""
         self._stop.set()
-        if self._watcher is not None:
-            self._watcher.stop()
-            self._watcher = None
         for key in self._held:
             core_input.key_up(key)
         self._held = []
@@ -112,28 +100,16 @@ class CombatMacro:
     # 配置
     # --------------------------------------------------------
     def _is_cyclone(self) -> bool:
-        return self.settings.active_profile == CYCLONE_PROFILE
+        return self.settings.combat.active_profile == CYCLONE_PROFILE
 
     def _profile_name(self) -> str:
-        return "旋风" if self._is_cyclone() else f"配置{self.settings.active_profile}"
+        return "旋风" if self._is_cyclone() else f"配置{self.settings.combat.active_profile}"
 
     def _current_config(self) -> tuple[list[str], dict[str, KeyConfig]]:
         if self._is_cyclone():
-            return list(self.settings.cyclone.keys()), self.settings.cyclone
-        profile = self.settings.profiles[self.settings.active_profile - 1]
+            return list(self.settings.combat.cyclone.keys()), self.settings.combat.cyclone
+        profile = self.settings.combat.profiles[self.settings.combat.active_profile - 1]
         return list(profile.keys()), profile
-
-    def _start_watcher(self) -> None:
-        templates = {
-            key: vision.load_template(TEMPLATES_DIR / f"{key}.png") for key in CYC_DETECT_KEYS
-        }
-        self._watcher = vision.CycloneWatcher(
-            dict(self.settings.cyclone_coords),
-            templates,
-            on_trigger=core_input.press,
-            logger=self.log,
-        )
-        self._watcher.start()
 
     # --------------------------------------------------------
     # 调度主循环

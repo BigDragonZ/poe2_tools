@@ -17,7 +17,7 @@ from collections.abc import Callable
 from poe2_tools.config.settings import Point, Settings
 from poe2_tools.core import window
 
-Logger = Callable[[str], None]
+Logger = Callable[[str, str], None]  # (消息, 级别)；级别默认 INFO，bus.log 兼容
 
 
 class ToggleRunner:
@@ -36,10 +36,10 @@ class ToggleRunner:
     def running(self) -> bool:
         return self._running
 
-    def log(self, message: str) -> None:
+    def log(self, message: str, level: str = "INFO") -> None:
         print(message)
         if self._logger is not None:
-            self._logger(message)
+            self._logger(message, level)
 
     def toggle(self) -> None:
         """热键入口：运行中 → 停止；空闲 → 启动。"""
@@ -89,11 +89,11 @@ class ToggleRunner:
         """公共检查：POE2 前台 + 已标定格距 + 取鼠标位置。"""
         if not window.is_poe_active():
             return None
-        if self.settings.cell_size <= 0:
-            self.log("请先用 F3/F4 标定背包格子间距")
+        if self.settings.general.sort.cell_size <= 0:
+            self.log("请先用 F3/F4 标定背包格子间距", "WARN")
             return None
         origin = window.cursor_client_pos()
         if origin is None:
-            self.log("未找到 POE2 窗口")
+            self.log("未找到 POE2 窗口", "ERROR")
             return None
         return origin

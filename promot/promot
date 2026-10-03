@@ -1,0 +1,234 @@
+下面是我对项目的设计和想法，现在针对下面的内容，提出5-10个有用的问题和建议
+```
+# 需求：
+D:\game\poe1_tools 是我之前开发的poe1游玩工具，主要用来解决一些重复性的工作，现在我正在开发poe2游玩的工具，接下来先开发工具界面，目前主界面：
+界面分为几个模块
+1、背包整理，这里的坐标定位复用poe1的工具代码
+2、战斗，按键功能复用poe1的工具代码
+3、地图
+4、装备
+
+# 开发标准
+工具语言选择py，环境是win11
+初始化git仓库，git@github.com:BigDragonZ/poe2_tools.git
+使用专门的文件夹用来管理changelog，changelog超过10个进行一次合并
+功能开发验证通过后，提交至github
+生成项目文档，项目文档主要记录项目框架等整体性内容
+生成功能文档，主要解释工具的功能及使用方式
+```
+
+回答如下
+```
+1、直接复制 poe_tools/ 模块再适配、抽公共包
+2、 POE2 的坐标体系和 POE1 一致
+3、地图和装备模块暂时只做占位，不开发
+4、不需要，本工具使用纯py
+5、暂时使用tkinter 后续功能丰富了改成qt
+6、可以，明确命名规范（ changelog/2025-01-15-功能名.md）、合并目标（汇总进 CHANGELOG.md 后删明细），并写进新项目 AGENTS.md 让 AI 自动维护。 
+7、在功能文档同步添加待完成清单，人工验证后更新
+```
+另外为了方便管理，每次提问后回答回答的内容写到根目录response文档里,只保留最近一次的回答内容
+
+
+C:\Users\zhang\AppData\Roaming\exilence-next-tx-app\EfarmTools\pob-tools
+
+1、验证通过
+
+
+接下来准备开发前端应用，专门用来记录poe2游玩的信息，先开发经济页面,一级菜单位于顶部，二三级菜单位于左侧，经济-> 赛季->闪回0.5
+赛季：0.5.5闪回
+开服时间：0904
+物价：读取页面内容
+下面这里放置的是所有区分的模块
+```
+<div class="card-body"><div class="row row-cols-2 row-cols-lg-5"><a href="Economy_Currency" class="col d-flex align-items-center"><img loading="lazy" src="https://cdn.poe2db.tw/image/Art/2DItems/Currency/CurrencyAddModToMagic.webp" alt="CurrencyAddModToMagic" class="size64"> 通貨</a><a href="Economy_Fragments" class="col d-flex align-items-center"><img loading="lazy" src="https://cdn.poe2db.tw/image/Art/2DItems/Currency/SoulCores/TrialmasterKey1.webp" alt="TrialmasterKey1" class="size64"> 碎片</a><a href="Economy_Ritual" class="col d-flex align-items-center"><img loading="lazy" src="https://cdn.poe2db.tw/image/Art/2DItems/Currency/Omens/VoodooOmens1Green.webp" alt="VoodooOmens1Green" class="size64"> 祭祀</a><a href="Economy_Essences" class="col d-flex align-items-center"><img loading="lazy" src="https://cdn.poe2db.tw/image/Art/2DItems/Currency/Essence/LifeEssenceLesser.webp" alt="LifeEssenceLesser" class="size64"> 精髓</a><a href="Economy_Breach" class="col d-flex align-items-center"><img loading="lazy" src="https://cdn.poe2db.tw/image/Art/2DItems/Currency/Breach/BreachstoneSplinter.webp" alt="BreachstoneSplinter" class="size64"> 裂痕聯盟</a><a href="Economy_Delirium" class="col d-flex align-items-center"><img loading="lazy" src="https://cdn.poe2db.tw/image/Art/2DItems/Maps/DeliriumSplinter.webp" alt="DeliriumSplinter" class="size64"> 譫妄異域</a><a href="Economy_Expedition" class="col d-flex align-items-center"><img loading="lazy" src="https://cdn.poe2db.tw/image/Art/2DItems/Currency/Expedition2/ExpeditionGemCurrency.webp" alt="ExpeditionGemCurrency" class="size64"> 死境探險</a><a href="Economy_Runes" class="col d-flex align-items-center"><img loading="lazy" src="https://cdn.poe2db.tw/image/Art/2DItems/Currency/Runes/FireRuneTier1.webp" alt="FireRuneTier1" class="size64"> 符文</a><a href="Economy_Soul_Cores" class="col d-flex align-items-center"><img loading="lazy" src="https://cdn.poe2db.tw/image/Art/2DItems/Currency/SoulCores/GreaterSoulCoreTriElement.webp" alt="GreaterSoulCoreTriElement" class="size64"> 靈魂核心</a><a href="Economy_Idols" class="col d-flex align-items-center"><img loading="lazy" src="https://cdn.poe2db.tw/image/Art/2DItems/Currency/TormentedSpiritSocketables/AzmeriSocketableBear.webp" alt="AzmeriSocketableBear" class="size64"> 魔偶</a><a href="Economy_Uncut_Gems" class="col d-flex align-items-center"><img loading="lazy" src="https://cdn.poe2db.tw/image/Art/2DItems/Gems/UncutSupportGem.webp" alt="UncutSupportGem" class="size64"> 未切割的寶石</a><a href="Economy_Abyss" class="col d-flex align-items-center"><img loading="lazy" src="https://cdn.poe2db.tw/image/Art/2DItems/Currency/Abyss/GnawedJawbone.webp" alt="GnawedJawbone" class="size64"> 深淵</a><a href="Economy_Gems" class="col d-flex align-items-center"><img loading="lazy" src="https://cdn.poe2db.tw/image/Art/2DItems/Gems/New/NewSupport/Lineage/LineageLifetap.webp" alt="LineageLifetap" class="size64"> 寶石</a><a href="Economy_Atziris_Temple" class="col d-flex align-items-center"><img loading="lazy" src="https://cdn.poe2db.tw/image/Art/2DItems/Currency/IncursionCraftingOrbs/IncursionGreaterVaalOrb.webp" alt="IncursionGreaterVaalOrb" class="size64"> 阿茲里的神廟</a></div></div>
+其中 
+通货对应的是 https://poe2db.tw/tw/Economy_Currency 
+碎片对应的是 https://poe2db.tw/tw/Economy_Fragments
+其他依此规律
+读取页面后  <div class="table-responsive"> 表格内容放置在这个class下
+
+1、temp/image.png放置的页面的预览内容，现在重点是读取页面内容，在前端展示出来，读取一次，默认缓存，页面添加手动刷新按钮，支持主动刷新。
+2、抓取到的数据需存储到本地，后续还会根据开服的时间进行分析，使用json结构或数据库存储都可以
+
+根据上述内容分析开发页面还有哪些待补充的内容和问题
+
+炖了一锅鱼
+https://docs.qq.com/sheet/DRnNidnZ5cXp3R2F0?tab=sgsr82&_t=1789397100232&nlc=1
+
+
+1、独立 Web 应用
+2、 react  cdn
+3、SQLite
+4、本仓库新目录
+5、一次刷新抓全部 14 个模块页面加间隔（礼貌性限速，避免被 CDN 封），大约要十几秒。
+6、分页
+7、现阶段暂时手动刷新，程序支持定时自动抓取，一般情况下开服时每天抓取，开服2周后每周抓取，这里支持页面进行配置。
+8、基准单位选神圣石，根据当前混沌 互换  神圣的价格，后面新增对应混沌 的价格
+9、下载到本地
+10、未来一级有策略、做装、开荒，其他的待定。 二级菜单是赛季，赛季菜单是模块，赛季记录在数据库里，后续可针对赛季，开服天数，进行筛选，默认选择 当前赛季，开服天数选最大
+11、赛季名称，开服时间手动配置，新旧赛季数据都要保留可查
+12、直接复刻，保留原站，但是要加上英文名称，方便搜索
+13、需要排序（按涨跌幅/交易量）、搜索物品名、筛选
+14、刷新当前模块
+15、是的
+
+1、经济模块显示在页面内左侧，不要放置在菜单下面
+
+
+
+
+
+接下来开发开发自动化程序来获取需要的信息，操作步骤：
+启动程序后，获取通货兑换比例的步骤如下
+1、移动到位置1：我需要的，左键点击后移动到输入栏，输入需要的通货英文名称，在搜索结果区域选中对应的通货
+2、移动到位置2：我拥有的，左键点击后移动到输入栏，输入需要的通货英文名称，在搜索结果区域选中对应的通货
+3、读取中间指定位置区域的结果比例，记录结果，同时更新到交易助手界面
+
+这是目前我的操作流程
+
+
+物品種類: 長矛
+稀有度: 傳奇
+阿茲里的輕視
+尖叉長矛
+--------
+品質: +20% (augmented)
+物理傷害: 73 到 217 (augmented)
+元素傷害: 85 到 133 (fire), 3 到 267 (lightning)
+暴擊率: 5.00%
+每秒攻擊次數: 1.80 (augmented)
+--------
+需求: 等級 72, 44 (augmented) 力量, 110 (augmented) 敏捷
+--------
+插槽: S S 
+--------
+物品等級: 82
+--------
+附加2至60閃電傷害 (rune)
+--------
+賦予技能: 長矛投擲
+賦予技能: 等級 19 憎惡碎綻
+--------
+{ 傳奇詞綴 — 傷害,物理,攻擊 }
+增加103(100-120)%物理傷害
+{ 傳奇詞綴 — 傷害,元素,火焰,攻擊 }
+附加85(83-97)至133(123-153)火焰傷害
+{ 傳奇詞綴 — 傷害,元素,閃電,攻擊 }
+附加1至207(193-207)閃電傷害
+{ 傳奇詞綴 — 攻擊,速度 }
+增加16(10-16)%攻擊速度
+{ 傳奇詞綴 — 光環 }
+增加80(60-80)%存在範圍的範圍效果
+{ 傳奇詞綴 }
+長矛技能擊中時產生一支血石之槍，每個目標至多產生30支 — 無法變動的值
+--------
+我的子民？我才不是為了他們而這麼做的。
+他們隸屬於我。他們想要我獲得這一切。
+他們甘願為我獻出名為愛與崇敬的贈禮，
+而我值得。我是他們的女王。
+--------
+已汙染
+
+
+做装页面下新增：
+二级菜单：戒指
+页面：稀有度
+页面内容：
+目标：52%稀有度+双t1点伤+抗性戒指
+使用流程图展示操作模块
+模块1：底材
+1、购买锁后缀的t1稀有度 金光戒指  82底材
+注意事项：由于后面要用到品质工艺，所以锁的词条必须是非工艺词条，这里可以用alt键查看词条是否是工艺词条
+2、使用通货剥离石，剥离到只有一条词缀+锁的词缀
+3、使用混沌石开始C
+根据C出来的结果，下面需要拆分模块
+模块2.1  双点伤+品质+
+最佳选择：C出来T1点伤
+1、使用完美崇高石+左旋+攻击(掠夺)催化剂喜悦
+注意：出现t2点伤，批量做或自用都可以保留，不想要的话，就需要剥离，
+如果剥离错了，就需要3-4.1重复，直到出现t1点伤，成本较高。
+2、右旋+普通e，打一个后缀
+3、购买品质精华，右旋结晶，目的：使用精华吃掉5.1的后缀，打上品质精华+20%品质后，
+备注1、使用攻击催化剂打满40品质，确保攻击词缀都可以迟到
+备注2、如果缺少抗性，可以用对应的抗性催化剂，这样对应点伤+对应抗性(全抗)都可以享受催化剂效果
+4、削切+混沌石，如果C后前缀，继续削切，直到出现后缀
+备注1：+20%是C词条，最低级别词条，所以默认削切是必定吃掉这一条的，同样类型的还有深渊解密词条
+备注2:普通混沌石，确保出现的是低等级词缀，这样削切可以精准命中
+5、使用前缀(古老的骨头)+左旋死灵，占掉前缀词条，这里可以先解密，也可以最后解密
+模块3：洗后缀
+1、看后缀是否是你想要的词条，如果不是，查看是否缺少抗性
+3、不缺少，使用右旋结晶+迅捷合金，吃掉5.4的后缀，打上攻击速度后缀
+4、完美E，查看E的结果，如果不理想
+5、右旋废止+剥离，洗掉一条后缀
+6、从8.1开始重复，直到自己想要的词缀
+
+分支2.2
+C出来t1前缀稀有
+4.2不要强行做双t1点伤的戒指了，因为后面骨头解密成本太高
+分支2.3
+C出来
+4.3T1全抗，看经济条件，如果不好，就跟稀有度一样
+
+
+ 接下来我准备开发自动化交易助手工具，来获取游戏内的交易物价信息：
+整体需求：在游戏工具内新增功能：物价，功能是通过opencv+鼠标控制来获取游戏内的物价信息
+操作步骤：
+1、点击 我需要的，点击热门，截图指定区域，获取热门通货，根据热门通货的名称，在资料库内获取通货的英文名称
+2、
+
+桌面工具在测试后新增开发：
+要求：这里负责收集开发阶段需要的信息：
+1、测量坐标：参考坐标模块的功能选定坐标
+2、选择范围：开启功能后，使用鼠标左键框选范围
+默认支持6个坐标，6个范围
+
+
+开发
+坐标
+1：我需要的
+2：我拥有的
+3: 输入框
+4: 市场比率
+5：搜索结果第一个
+
+范围
+1: 搜索结果候选框
+2：热门范围
+3: 交易比例结果
+
+
+现在游玩工具的界面比较乱，开始进行优化：
+总共拆分为以下几个大模块，每个模块的激活按键是独立的，在底部通过选择不同的模块切换当前的功能：
+模块拆分：战斗，通用，研发，交易
+战斗：将现在的配置1和旋风，放置在战斗模块下
+通用：将石碑速点、地图速点、整理放置在通用模块下，配置也移动到对应模块
+研发：开发、测试、坐标移动到开发模块下
+交易：预留
+
+接下来开始开发工具：获取A和B互换的比例
+功能1：提供A,B的通货名称，获取A兑换B的比例
+前置：开发模块下记录了需要的坐标
+步骤：
+1、复制A通货的英文名称到粘贴板
+2、鼠标移动到坐标1：我需要的，左键点击
+3、鼠标移动到坐标3: 输入框，粘贴A的通货名称
+4、鼠标移动到坐标5：搜索结果第一个，左键点击
+5、复制B通货的英文名称到粘贴板
+6、鼠标移动到坐标2：我拥有的，左键点击
+7、鼠标移动到坐标3: 输入框，粘贴B的通货名称
+8、鼠标移动到坐标5：搜索结果第一个，左键点击
+9、鼠标移动到坐标4：市场比率
+10、按住alt键，截取范围3: 交易比例结果部分图片
+11、读取图片里每一行的比例和库存，按照图片的顺序，从上到下记录B换A比例结果，如果图片显示里没有识别到库存两个字，说明市场没有类似的交易
+12、鼠标移动到坐标1：我需要的，使用ctrl+鼠标左键，点击一下
+13、鼠标移动到坐标4：市场比率
+14、按住alt键，截取范围3: 交易比例结果部分图片
+15、读取图片里每一行的比例和库存，按照图片的顺序，从上到下记录A换B比例结果，如果图片显示里没有识别到库存两个字，说明市场没有类似的交易
+16、返回B换A比例结果和A换B比例结果
+
+
+
+验证：
+A:Divine Orb
+B:Chaos Orb

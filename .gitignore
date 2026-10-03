@@ -6,5 +6,6 @@ poe2_tools.ini
 web/data/
 web/static/icons/
 templates/
+logs/
 cyclone_debug.log
 temp/

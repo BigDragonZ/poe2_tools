@@ -32,9 +32,10 @@ class WaystoneRunner(ToggleRunner):
     def preflight(self) -> Point | None:
         if not window.is_poe_active():
             return None
-        if currency_coord(self.settings, self.settings.way_currency, self.settings.way_tier) is None:
-            name = CURRENCY_NAMES.get(self.settings.way_currency, self.settings.way_currency)
-            self.log(f"请先在「坐标」页标定「{name}」")
+        tablet = self.settings.general.tablet
+        if currency_coord(self.settings, tablet.currency, tablet.tier) is None:
+            name = CURRENCY_NAMES.get(tablet.currency, tablet.currency)
+            self.log(f"请先在「坐标」页标定「{name}」", "WARN")
             return None
         origin = self._check_common()
         if origin is not None:
@@ -42,17 +43,19 @@ class WaystoneRunner(ToggleRunner):
         return origin
 
     def _work(self, origin: Point) -> None:
-        coord = currency_coord(self.settings, self.settings.way_currency, self.settings.way_tier)
+        tablet = self.settings.general.tablet
+        sort = self.settings.general.sort
+        coord = currency_coord(self.settings, tablet.currency, tablet.tier)
         assert coord is not None  # preflight 已校验
         driver = batch_ops.BatchDriver()
         aborted = batch_ops.apply_currency_to_bag(
             coord,
             1,
             origin,
-            self.settings.cell_size,
-            self.settings.rows,
-            self.settings.cols,
-            self.settings.way_interval_ms,
+            sort.cell_size,
+            sort.rows,
+            sort.cols,
+            tablet.interval_ms,
             self._should_stop,
             window.is_poe_active,
             driver,

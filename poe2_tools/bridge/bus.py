@@ -4,7 +4,7 @@
 进程内事件总线：模块 → UI / WebSocket 的解耦通道。
 
 消息为 dict，JSON 可序列化，契约见 docs/architecture.md：
-- {"type": "log",    "message": "..."}
+- {"type": "log",    "message": "...", "level": "INFO|WARN|ERROR|DEBUG"}
 - {"type": "status", "payload": {"foreground": bool, "combat": "running|stopped",
                                   "bag": "...", "waystone": "...", "map": "..."}}
 - {"type": "event",  "name": "calibrated|aborted|error", "detail": "..."}
@@ -50,8 +50,9 @@ class EventBus:
     # --------------------------------------------------------
     # 便捷发布
     # --------------------------------------------------------
-    def log(self, message: str) -> None:
-        self.publish({"type": "log", "message": message})
+    def log(self, message: str, level: str = "INFO") -> None:
+        """发布日志消息；level 取 INFO/WARN/ERROR/DEBUG，默认 INFO。"""
+        self.publish({"type": "log", "message": message, "level": level})
 
     def status(self, payload: dict) -> None:
         self.publish({"type": "status", "payload": payload})

@@ -187,26 +187,12 @@ def api_put_schedule(body: ScheduleIn):
     return scheduler.get_schedule_config()
 
 
-# ---------- 交易助手 ----------
-
-class TradeRateIn(BaseModel):
-    from_unit: str
-    to_unit: str
-    amount_from: float
-    amount_to: float
-    side: str = "sell"  # buy = 市场买入（付金币），sell = 卖出（免金币）
-
+# ---------- 交易（市场比例） ----------
 
 class GoldValuesIn(BaseModel):
     exalted: float | None = None
     chaos: float | None = None
     divine: float | None = None
-
-
-def _valid_unit(unit):
-    if unit in trading.BASE_CURRENCIES:
-        return True
-    return trading.is_item_unit(unit) and len(unit) > len(trading.ITEM_PREFIX)
 
 
 def _trade_unit_icons(latest):
@@ -241,46 +227,43 @@ def _gold_values():
 
 
 @app.get("/api/trade/state")
-def api_trade_state():
-    """交易页全量状态：最新汇率、历史、最优方案、套利环、金币转化比例。"""
-    latest = db.latest_trade_rates()
+def api_trade_state(category: str = "default"):
+    """交易页全量状态：最新汇率、历史、最优方案、套利环、金币转化比例。
+
+    category 对应交易菜单三级页面：default（默认）/ custom（指定）/ auto（自动），
+    数据由游玩工具交易模块对应子标签抓取同步（桌面端直接写库，本页面只读展示）。
+    """
+    if category not in db.TRADE_CATEGORIES:
+        raise HTTPException(400, "category 取值 default|custom|auto")
+    latest = db.latest_trade_rates(category)
     gold_values = _gold_values()
     gv = {u: g["value"] for u, g in gold_values.items() if g["value"]}
+    # 最优兑换：基础通货 + 该类别汇率中出现的物品单位，两两计算
+    item_units = sorted({
+        u for r in latest for u in (r["from_unit"], r["to_unit"])
+        if trading.is_item_unit(u)
+    })
+    units = trading.BASE_CURRENCIES + item_units
     best = {}
-    for src in trading.BASE_CURRENCIES:
-        for dst in trading.BASE_CURRENCIES:
+    for src in units:
+        for dst in units:
             if src == dst:
                 continue
             rate, path = trading.best_conversion(latest, src, dst, gv)
             if rate is not None:
                 best[src + ">" + dst] = {"rate": rate, "path": path}
     return {
+        "category": category,
         "base_currencies": [{"unit": u, "label": trading.BASE_LABELS[u]}
                             for u in trading.BASE_CURRENCIES],
         "latest": latest,
-        "history": db.list_trade_rates(30),
+        "history": db.list_trade_rates(30, category),
         "best": best,
         "cycles": trading.find_profitable_cycles(latest, gv),
         "gold_values": gold_values,
         "gold_conversion": trading.gold_conversion(latest, gv),
         "unit_icons": _trade_unit_icons(latest),
-        "known_items": db.list_item_names(),
     }
-
-
-@app.post("/api/trade/rates", status_code=201)
-def api_add_trade_rate(body: TradeRateIn):
-    if not (_valid_unit(body.from_unit) and _valid_unit(body.to_unit)):
-        raise HTTPException(400, "无效的兑换单位")
-    if body.from_unit == body.to_unit:
-        raise HTTPException(400, "兑换双方不能相同")
-    if body.amount_from <= 0 or body.amount_to <= 0:
-        raise HTTPException(400, "数量必须为正数")
-    if body.side not in ("buy", "sell"):
-        raise HTTPException(400, "side 取值 buy|sell")
-    rate_id = db.add_trade_rate(body.from_unit, body.to_unit,
-                                body.amount_from, body.amount_to, body.side)
-    return {"id": rate_id}
 
 
 @app.delete("/api/trade/rates/{rate_id}")

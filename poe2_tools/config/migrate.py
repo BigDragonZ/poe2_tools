@@ -17,7 +17,6 @@ from pathlib import Path
 
 from poe2_tools.config.settings import (
     CURRENCY_KEYS,
-    CYC_DETECT_KEYS,
     CYC_KEYS,
     PROFILE_COUNT,
     SKILL_KEYS,
@@ -86,29 +85,31 @@ def migrate_ahk_config(raw: bytes) -> Settings:
     config.read_file(io.StringIO(decode_ahk_ini(raw)))
 
     s = Settings()
-    s.combat_hotkey = _get(config, "General", "CombatHotkey") or s.combat_hotkey
-    s.dump_hotkey = _get(config, "General", "DumpHotkey") or s.dump_hotkey
-    s.active_profile = _get_int(config, "General", "ActiveProfile", 1)
+    s.combat.hotkey = _get(config, "General", "CombatHotkey") or s.combat.hotkey
+    s.general.sort.hotkey = _get(config, "General", "DumpHotkey") or s.general.sort.hotkey
+    s.combat.active_profile = _get_int(config, "General", "ActiveProfile", 1)
 
-    s.way_hotkey = _get(config, "Waystone", "Hotkey") or s.way_hotkey
-    s.way_currency = _get(config, "Waystone", "Currency") or s.way_currency
-    s.way_tier = _get_int(config, "Waystone", "Tier", 1)
-    s.way_interval_ms = _get_int(config, "Waystone", "Interval", s.way_interval_ms)
+    s.general.tablet.hotkey = _get(config, "Waystone", "Hotkey") or s.general.tablet.hotkey
+    s.general.tablet.currency = _get(config, "Waystone", "Currency") or s.general.tablet.currency
+    s.general.tablet.tier = _get_int(config, "Waystone", "Tier", 1)
+    s.general.tablet.interval_ms = _get_int(
+        config, "Waystone", "Interval", s.general.tablet.interval_ms
+    )
 
-    s.map_hotkey = _get(config, "Map", "Hotkey") or s.map_hotkey
-    s.map_interval_ms = _get_int(config, "Map", "Interval", s.map_interval_ms)
+    s.general.map_click.hotkey = _get(config, "Map", "Hotkey") or s.general.map_click.hotkey
+    s.general.map_click.interval_ms = _get_int(
+        config, "Map", "Interval", s.general.map_click.interval_ms
+    )
 
-    s.cell_size = _get_int(config, "Bag", "CellSize", 0)
-    s.rows = _get_int(config, "Bag", "Rows", s.rows)
-    s.cols = _get_int(config, "Bag", "Cols", s.cols)
-    s.dump_interval_ms = _get_int(config, "Bag", "DumpInterval", s.dump_interval_ms)
+    s.general.sort.cell_size = _get_int(config, "Bag", "CellSize", 0)
+    s.general.sort.rows = _get_int(config, "Bag", "Rows", s.general.sort.rows)
+    s.general.sort.cols = _get_int(config, "Bag", "Cols", s.general.sort.cols)
+    s.general.sort.interval_ms = _get_int(
+        config, "Bag", "DumpInterval", s.general.sort.interval_ms
+    )
 
     for key in CYC_KEYS:
-        s.cyclone[key] = _migrate_key_config(config, "Cyclone", key, default_key_config(key))
-    for key in CYC_DETECT_KEYS:
-        x, y = _get(config, "Cyclone", f"{key}_x"), _get(config, "Cyclone", f"{key}_y")
-        if x and y:
-            s.cyclone_coords[key] = Point(int(x), int(y))
+        s.combat.cyclone[key] = _migrate_key_config(config, "Cyclone", key, default_key_config(key))
 
     for key in CURRENCY_KEYS:
         x, y = _get(config, "Currency", f"{key}_x"), _get(config, "Currency", f"{key}_y")
@@ -120,7 +121,7 @@ def migrate_ahk_config(raw: bytes) -> Settings:
         profile: dict[str, KeyConfig] = {}
         for key in SKILL_KEYS:
             profile[key] = _migrate_key_config(config, section, key, default_key_config(key))
-        s.profiles[i] = profile
+        s.combat.profiles[i] = profile
 
     return s
 
@@ -139,9 +140,9 @@ def migrate_file(ahk_ini: Path, target_ini: Path) -> Settings | None:
 
 def merge_ahk_coords(settings: Settings, raw: bytes) -> list[str]:
     """
-    增量合并 AHK ini 中的坐标数据（货币 + 旋风 Q/E）到现有配置。
+    增量合并 AHK ini 中的货币坐标到现有配置。
     只填充当前未标定的项，不覆盖已有坐标与其他配置。
-    返回本次同步的项目名列表（如 ["currency:alch", "cyclone:q"]）。
+    返回本次同步的项目名列表（如 ["currency:alch"]）。
     """
     config = configparser.ConfigParser()
     config.optionxform = str
@@ -155,13 +156,6 @@ def merge_ahk_coords(settings: Settings, raw: bytes) -> list[str]:
         if x and y:
             settings.currency[key] = Point(int(x), int(y))
             synced.append(f"currency:{key}")
-    for key in CYC_DETECT_KEYS:
-        if key in settings.cyclone_coords:
-            continue
-        x, y = _get(config, "Cyclone", f"{key}_x"), _get(config, "Cyclone", f"{key}_y")
-        if x and y:
-            settings.cyclone_coords[key] = Point(int(x), int(y))
-            synced.append(f"cyclone:{key}")
     return synced
 
 

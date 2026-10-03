@@ -5,7 +5,94 @@
 
 ---
 
+## 2026-10-03
+
+### 交易菜单拆分与手动录入移除
+
+- Web 新增一级菜单「交易」（经济 / 交易 / 策略 / 做装 / 开荒），原「交易助手」从经济·工具移入，重命名「默认」；新增「指定」「自动」三级页面，侧边栏二级菜单「市场比例」统一嵌套
+- `trade_rates` 新增 `category` 列（default/custom/auto）：桌面端默认通货抓取 → 交易·默认页、指定抓取 → 交易·指定页、自动（预留）→ 交易·自动页；旧库迁移按 `item:` 单位回填 custom；同类别同方向只留最近一次，类别隔离互不影响
+- 交易页移除全部手动录入（组件 + `POST /api/trade/rates` 接口），只读展示游玩工具同步数据；保留 VE 值设置、金币转化、最佳兑换、套利环、同步历史（可删除）；最佳兑换单位集合扩展为「三基础通货 + 该类别物品单位」
+- 桌面端 `exchange.py`/`trade_module.py` 按类别发布并更新文案；pytest 218 项通过；API 与 Playwright 冒烟通过
+
+### 交易模块：默认/指定通货批量抓取与同步
+
+- 新增 `modules/market/exchange.py`：`DEFAULT_CURRENCIES`（崇高/混沌/神圣）、`default_pairs()`/`custom_pairs(name)`、`rates_from_scan()`（市场比率 x:y → side=buy 买边汇率）、`publish_rates()`（写 web/data/economy.db）、`ExchangeScanRunner`（顺序抓取多对，单对失败记 errors 继续，汇总一次性发布）
+- `trade_rates` 新增 `source` 列（manual/auto）；`replace_auto_trade_rates()` 同方向旧自动记录先删后插，只留最近一次
+- 交易模块页重构为四子页：默认通货（F9）/ 指定（F10）/ 自动（预留）/ 比例测试（F8）；`[MarketScan]` 新增 HotkeyDefault/HotkeyCustom/CustomCurrency；批量抓取在工作线程执行，结果不在桌面端展示
+- 验证：pytest 216 项通过；同步链路端到端验证（入库 → API 最佳兑换含金金币折算）；游戏内抓取待人工验证
+
+### 通货市场比例抓取模块（新增 modules/market/）
+
+- `driver.py` 原子操作驱动（剪贴板/带修饰键点击 try/finally 释放/Ctrl+A/Ctrl+V 粘贴/mss 截屏，±30% 抖动）；`parser.py` OCR 解析纯逻辑（比例正则、库存特征模糊匹配含 OCR 混淆变体、千分位）；`ocr.py` RapidOCR 懒加载封装（可注入替身）；`scanner.py` 双向抓取控制器（Phase 2 Ctrl+左键反转方向），坐标复用开发页 point1~5/range3
+- 迭代修正（游戏内实测反馈）：截屏去 Alt；解析放宽（有比例即有效，库存缺失为 None）；单方向失败隔离；库存跨行合并；坐标化行列重建（纵向聚类 + 行内配对，兼容库存左/右布局）；range3 偏移修正（RangeOffsetX/Y 默认 -10/+20）；结果只取前 3 条；搜索/选中延时加保守（300/1200/800/500ms）；空结果重试一次；调试截图存 logs/market/；完成后弹提示框
+- 启动热键 F8（用户决策：所有功能必须提供游戏内启动热键）；测试 13 例（test_market_scanner.py）；全量 pytest 197 项通过
+
+### 界面模块化重构
+
+- 桌面端主界面重构：顶部全局状态栏 + 模块导航（战斗/通用/研发/交易，后移至运行状态区下方）+ StackedView 四模块 + 底部可折叠日志面板（级别着色/过滤）；战斗内嵌 配置1/旋风，通用内嵌 整理/石碑速点/地图速点，研发内嵌 开发/测试/坐标
+- 配置模型层级化：`combat`/`general.sort`/`general.tablet`/`general.map_click`/`dev` 分组；ini 段更名 [Combat]/[Sort]/[Tablet]，按键级回退兼容旧段旧键；`bus.log` 支持日志级别
+- 页面动作键作用域按「模块 + 子页」隔离（F5∈旋风/坐标/开发，F2∈测试），功能热键 POE2 前台即生效；pytest 184 项全绿
+
+### 通用模块合并单页 + 热键捕获与瓦尔流程
+
+- 通用模块三子标签合并单页：顶部汇总行展示热键；背包网格（行/列/格子间距）作为通用配置只保留一份；各功能独立参数分区平铺
+- 热键行恢复按键捕获（后台线程 keyboard.read_key()，Esc 取消）+ 手动输入框双方式，保存配置后生效
+- 地图速点瓦尔阶段简化：按住 Shift → 右键选中瓦尔一次 → 逐格左键，不再逐格重选；移除 MAP_RESELECT_KEYS 与 reselect_per_cell；500ms 最小间隔兜底保留
+
+### 开发页：测量坐标与框选范围
+
+- 新增「开发」页：6 个测量坐标（按钮 + F5，同坐标模块流程）+ 6 个框选范围（左键拖框，F5 重开，F12 取消）；`modules/measure.py`（normalize_range 规范化 + RangeMarkSession 旁观框选会话，<4×4 视为误触）；ini 新增 `[Measure]` 段；F5 标定路由扩展为三页
+- 测试 9 项（test_measure.py）；pytest 178 项通过
+
+### Web 菜单三级嵌套标准确立
+
+- 全应用统一：顶部一级菜单 → 侧边栏二级菜单（`.side-l2` 纯分组）→ 三级菜单（`.side-item.sub` 页面）嵌套于二级下；不允许内容区自设菜单列
+- 做装页从禁用改为可用：戒指 → 稀有度做装流程图（52% 稀有度 + 双 T1 点伤 + 抗性戒指，纯前端 FlowNode/FlowArrow 组件，含底材/双点伤+品质/洗后缀模块与两个放弃分支）
+- 二次修正：经济模块（14 个）回滚为页内数据视图（内容区模块列），不拆分侧边栏页面；经济侧边栏只留赛季切换区 + 工具菜单
+- `web/browser_check.py` 同步断言（35 项通过），截图 temp/browser/04、05
+
+## 2026-10-02
+
+### 刷图自动化修复与调整（Q6 检测 / 侧键 / 启动）
+
+- Q6 匹配度 1px 容差修复：实况亮像素与模板完全相同但逐像素比对仅 0.919（抗锯齿边缘 1px 偏移），`mask_confidence` 改为实况二值图先膨胀 1px 再求交，实测匹配度 0.919 → 1.000
+- 侧键切换 XButton1 → XButton2：新增侧键识别工具 `mapping/check_buttons.py`（mouse 钩子 + GetAsyncKeyState 双通道），确认用户习惯按的是 XButton2，配置默认值同步修改
+- 刷图启动按钮改等待前台自动启动：点「启动」时 POE2 非前台进入 500ms 轮询（15 秒超时），切回游戏窗口即自动启动；修复此前按钮必失败的缺陷；注明 F2 不启动刷图助手
+
+### 标签页热键独立 + 功能设置区加宽
+
+- 功能热键（战斗/整理/石碑/地图/F3/F4）与标签页无关，POE2 前台即生效，战斗宏作用于当前激活配置页；页面级动作键归属各自页面（F5 标定→旋风/坐标，F2 记录→测试），同键冲突时动作键优先，页不对时日志提示归属页
+- 窗口默认 960→1180 宽，功能设置区按自然宽度 ×2 固定
+
+### 测试页：F2 输入记录与释放频率分析
+
+- 新增 `modules/recorder/`：F2 切换记录鼠标全键位 + Q/E 按下（相对秒级时间戳，0.5s 防抖），每轮存 `logs/recordings/round-*.json`；纯逻辑分析过滤自动重复（<80ms）/停顿（>10s 切片段）/碎片（<5s），输出各键位次数/频率/中位间隔
+- 「测试」标签页：状态 + 分析报告 + 清空；注意刷图助手停止时 unhook_all 会清钩子，记录期间勿启停
+
+### 地图速点瓦尔漏点修复
+
+- 瓦尔腐化有动画、点击后可能取消货币选中，阶段开始只选一次导致后续点击被吞
+- `apply_currency_to_bag` 新增 `reselect_per_cell`（每格前重新右键选中，幂等安全）；`MAP_RESELECT_KEYS={"vaal"}` + `MAP_MIN_INTERVAL_MS={"vaal":500}`，瓦尔阶段逐格重选且间隔不低于 500ms
+- 验证：pytest 169 项全部通过；游戏内人工验证待做
+
 ## 2026-10-01
+
+### 刷图自动化（极简健康刷图，新增模块）
+
+- 新增 `modules/mapping/`：三线程生产者-消费者（dxcam 截图 → 视觉仲裁 → SendInput 执行），确定性 FSM（IDLE/MOVING/LOOTING/COMBOS）严格优先级仲裁；loot 黑框过滤管道、Q=6 点阵识别（自适应局部二值化 + 对比度守卫）、拾取黑名单（网格量化 + 5s）、输入 jitter、I/Tab/Esc UI 挂起感知、失焦强制 IDLE
+- 新依赖 dxcam（0.3.0，`create()` 参数为 `output_color`，代码内 TypeError 回退）与 pywin32
+- 同日并入旋风页：Q=6 检测复用旋风 Q 坐标 ±30px 与 `templates/q.png` 二值化掩模，删除独立「刷图」Tab 与 `calibrate_q_template` 等旧标定
+
+### 旋风页精简与 Q6 右键两角标定
+
+- 移除旋风 Q/E 数字检测（`CycloneWatcher`、`core/vision.py` 整模块、`cyclone_coords` 等），旋风页只保留鼠标三键策略
+- Q6 标定改 F5 + 右键两角标记：`calibrate.py` 的 `Q6MarkSession` 右键钩子会话 + `normalize_roi` 纯逻辑 + 截图存 `templates/q6.png`；启动时对 ROI 截图做匹配测试（实况图存 `q6_live.png`，匹配度写 `logs/mapping.log`）
+- （注：F5 标定 Q6 精确区域曾短暂用「截右下角 + 连通域自动提取紧框」方案，同日被右键两角标记取代）
+
+### 刷图执行日志与 Q6 热重载
+
+- 修复先启动助手后 F5 标定时掩模恒为 None 的缺陷：`reload_q6` 热重载 + 禁用状态每 2 秒自动重试加载
+- 新增 `mapping/mlog.py` 文件日志（`logs/mapping.log`，毫秒时间戳）：启动配置摘要、FSM 转移、动作链摘要、黑名单、Q 匹配度节流输出、急停来源
 
 ### 桌面端 AHK → Python 全量重构
 

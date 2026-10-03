@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""配置模型单元测试：默认值、读写回环、非法值回退、货币坐标推导。"""
+"""配置模型单元测试：默认值、新段读写回环、旧段回退兼容、非法值回退、货币坐标推导。"""
 
 from __future__ import annotations
 
@@ -25,41 +25,56 @@ from conftest import write_ini
 # ============================================================
 def test_defaults() -> None:
     s = load_settings()
-    assert s.combat_hotkey == "f2"
-    assert s.dump_hotkey == "f1"
-    assert s.way_hotkey == "f6"
-    assert s.map_hotkey == "f7"
-    assert s.cell_size == 0
-    assert (s.rows, s.cols) == (sm.DEFAULT_ROWS, sm.DEFAULT_COLS)
-    assert s.active_profile == 1
-    assert len(s.profiles) == sm.PROFILE_COUNT
-    assert s.profiles[0]["LButton"].mode == sm.MODE_SPAM
-    assert s.profiles[0]["q"].mode == sm.MODE_DISABLED
-    assert set(s.cyclone.keys()) == set(sm.CYC_KEYS)
+    assert s.combat.hotkey == "f2"
+    assert s.general.sort.hotkey == "f1"
+    assert s.general.tablet.hotkey == "f6"
+    assert s.general.map_click.hotkey == "f7"
+    assert s.general.sort.cell_size == 0
+    assert (s.general.sort.rows, s.general.sort.cols) == (sm.DEFAULT_ROWS, sm.DEFAULT_COLS)
+    assert s.combat.active_profile == 1
+    assert len(s.combat.profiles) == sm.PROFILE_COUNT
+    assert s.combat.profiles[0]["LButton"].mode == sm.MODE_SPAM
+    assert s.combat.profiles[0]["q"].mode == sm.MODE_DISABLED
+    assert set(s.combat.cyclone.keys()) == set(sm.CYC_KEYS)
+    assert s.dev.debug is False
+    assert s.dev.log_level == "INFO"
+    assert s.combat.q6_roi is None
 
 
 # ============================================================
-# 读写回环
+# 读写回环（新段名）
 # ============================================================
 def test_roundtrip(temp_ini: Path) -> None:
     s = Settings()
-    s.cell_size = 70
-    s.rows, s.cols = 6, 12
-    s.way_currency = "ex"
-    s.way_tier = 2
+    s.general.sort.cell_size = 70
+    s.general.sort.rows, s.general.sort.cols = 6, 12
+    s.general.tablet.currency = "ex"
+    s.general.tablet.tier = 2
     s.currency["alch"] = Point(352, 238)
-    s.cyclone_coords["q"] = Point(1918, 1375)
-    s.profiles[0]["q"] = sm.KeyConfig(sm.MODE_SPAM, 4600, 690)
+    s.combat.profiles[0]["q"] = sm.KeyConfig(sm.MODE_SPAM, 4600, 690)
+    s.dev.debug = True
+    s.dev.log_level = "DEBUG"
     save_settings(s)
 
     loaded = load_settings()
-    assert loaded.cell_size == 70
-    assert (loaded.rows, loaded.cols) == (6, 12)
-    assert loaded.way_currency == "ex" and loaded.way_tier == 2
+    assert loaded.general.sort.cell_size == 70
+    assert (loaded.general.sort.rows, loaded.general.sort.cols) == (6, 12)
+    assert loaded.general.tablet.currency == "ex" and loaded.general.tablet.tier == 2
     assert loaded.currency["alch"] == Point(352, 238)
-    assert loaded.cyclone_coords["q"] == Point(1918, 1375)
-    q = loaded.profiles[0]["q"]
+    q = loaded.combat.profiles[0]["q"]
     assert q.mode == sm.MODE_SPAM and q.interval_ms == 4600 and q.jitter_ms == 690
+    assert loaded.dev.debug is True
+    assert loaded.dev.log_level == "DEBUG"
+
+
+def test_saved_uses_new_sections(temp_ini: Path) -> None:
+    save_settings(Settings())
+    text = temp_ini.read_text(encoding="utf-8")
+    for section in ("[Combat]", "[Sort]", "[Tablet]", "[Map]", "[Cyclone]",
+                    "[Profile1]", "[Currency]", "[Bridge]", "[Mapping]", "[Measure]", "[Dev]"):
+        assert section in text
+    for legacy in ("[General]", "[Waystone]", "[Bag]"):
+        assert legacy not in text
 
 
 def test_saved_as_utf8(temp_ini: Path) -> None:
@@ -69,54 +84,111 @@ def test_saved_as_utf8(temp_ini: Path) -> None:
 
 
 # ============================================================
+# 旧段回退兼容
+# ============================================================
+def test_legacy_sections_fallback(temp_ini: Path) -> None:
+    """只含旧段的 ini 能正确读入新模型。"""
+    temp_ini.write_text(
+        "[General]\nCombatHotkey = f9\nDumpHotkey = f3\nActiveProfile = 2\n"
+        "[Waystone]\nHotkey = f10\nCurrency = ex\nTier = 2\nInterval = 250\n"
+        "[Bag]\nRows = 6\nCols = 12\nDumpInterval = 45\nCellSize = 68\n",
+        encoding="utf-8",
+    )
+    s = load_settings()
+    assert s.combat.hotkey == "f9"
+    assert s.combat.active_profile == 2
+    assert s.general.sort.hotkey == "f3"
+    assert (s.general.sort.rows, s.general.sort.cols) == (6, 12)
+    assert s.general.sort.interval_ms == 45
+    assert s.general.sort.cell_size == 68
+    assert s.general.tablet.hotkey == "f10"
+    assert s.general.tablet.currency == "ex"
+    assert s.general.tablet.tier == 2
+    assert s.general.tablet.interval_ms == 250
+
+
+def test_new_section_takes_precedence_over_legacy(temp_ini: Path) -> None:
+    """新旧段并存时以新段为准。"""
+    temp_ini.write_text(
+        "[General]\nCombatHotkey = f9\n"
+        "[Combat]\nHotkey = f2\n"
+        "[Bag]\nCellSize = 70\n"
+        "[Sort]\nCellSize = 52\n",
+        encoding="utf-8",
+    )
+    s = load_settings()
+    assert s.combat.hotkey == "f2"
+    assert s.general.sort.cell_size == 52
+
+
+# ============================================================
 # 非法值回退与夹取
 # ============================================================
 def test_invalid_mode_falls_back(temp_ini: Path) -> None:
     write_ini(temp_ini, "Profile1", {"q_mode": "fly"})
-    assert load_settings().profiles[0]["q"].mode == sm.MODE_DISABLED
+    assert load_settings().combat.profiles[0]["q"].mode == sm.MODE_DISABLED
 
 
 def test_interval_clamped_to_minimum(temp_ini: Path) -> None:
     write_ini(temp_ini, "Profile1", {"q_mode": "spam", "q_interval": "10"})
-    assert load_settings().profiles[0]["q"].interval_ms == sm.MIN_INTERVAL_MS
+    assert load_settings().combat.profiles[0]["q"].interval_ms == sm.MIN_INTERVAL_MS
 
 
 def test_jitter_ms_read_directly(temp_ini: Path) -> None:
     write_ini(temp_ini, "Profile1", {"q_jitter": "120"})
-    assert load_settings().profiles[0]["q"].jitter_ms == 120
+    assert load_settings().combat.profiles[0]["q"].jitter_ms == 120
 
 
 def test_jitter_ms_clamped_to_range(temp_ini: Path) -> None:
     write_ini(temp_ini, "Profile1", {"q_jitter": "-5", "w_jitter": "99999"})
     s = load_settings()
-    assert s.profiles[0]["q"].jitter_ms == 0
-    assert s.profiles[0]["w"].jitter_ms == sm.MAX_BATCH_INTERVAL_MS
+    assert s.combat.profiles[0]["q"].jitter_ms == 0
+    assert s.combat.profiles[0]["w"].jitter_ms == sm.MAX_BATCH_INTERVAL_MS
 
 
 def test_legacy_random_switch_converts(temp_ini: Path) -> None:
     # 旧版布尔键 _random：1 → 间隔的 15%，0 → 0
     write_ini(temp_ini, "Profile1", {"q_interval": "1000", "q_random": "1", "w_random": "0"})
     s = load_settings()
-    assert s.profiles[0]["q"].jitter_ms == 150
-    assert s.profiles[0]["w"].jitter_ms == 0
+    assert s.combat.profiles[0]["q"].jitter_ms == 150
+    assert s.combat.profiles[0]["w"].jitter_ms == 0
 
 
 def test_batch_interval_clamped(temp_ini: Path) -> None:
-    write_ini(temp_ini, "Waystone", {"Interval": "99999"})
+    write_ini(temp_ini, "Tablet", {"Interval": "99999"})
     write_ini(temp_ini, "Map", {"Interval": "1"})
     s = load_settings()
-    assert s.way_interval_ms == sm.MAX_BATCH_INTERVAL_MS
-    assert s.map_interval_ms == sm.MIN_BATCH_INTERVAL_MS
+    assert s.general.tablet.interval_ms == sm.MAX_BATCH_INTERVAL_MS
+    assert s.general.map_click.interval_ms == sm.MIN_BATCH_INTERVAL_MS
+
+
+def test_batch_interval_clamped_legacy(temp_ini: Path) -> None:
+    """旧段名写入同样触发批量间隔夹取。"""
+    write_ini(temp_ini, "Waystone", {"Interval": "99999"})
+    s = load_settings()
+    assert s.general.tablet.interval_ms == sm.MAX_BATCH_INTERVAL_MS
 
 
 def test_unknown_currency_falls_back(temp_ini: Path) -> None:
-    write_ini(temp_ini, "Waystone", {"Currency": "mirror"})
-    assert load_settings().way_currency == "alch"
+    write_ini(temp_ini, "Tablet", {"Currency": "mirror"})
+    assert load_settings().general.tablet.currency == "alch"
 
 
 def test_tier_clamped(temp_ini: Path) -> None:
-    write_ini(temp_ini, "Waystone", {"Tier": "9"})
-    assert load_settings().way_tier == 3
+    write_ini(temp_ini, "Tablet", {"Tier": "9"})
+    assert load_settings().general.tablet.tier == 3
+
+
+def test_active_profile_clamped(temp_ini: Path) -> None:
+    write_ini(temp_ini, "Combat", {"ActiveProfile": "99"})
+    assert load_settings().combat.active_profile == sm.CYCLONE_PROFILE
+
+
+def test_dev_log_level_invalid_falls_back(temp_ini: Path) -> None:
+    write_ini(temp_ini, "Dev", {"LogLevel": "verbose", "Debug": "1"})
+    s = load_settings()
+    assert s.dev.log_level == "INFO"
+    assert s.dev.debug is True
 
 
 # ============================================================

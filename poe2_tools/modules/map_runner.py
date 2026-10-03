@@ -6,7 +6,8 @@
 流程（等价 AHK MapWorker）：
 点金石×每格 1 次 → 崇高×每格 4 次 → 瓦尔×每格 1 次 →
 完成后自动触发一次背包整理。
-每阶段：Shift 按住 → 货币坐标右键选中 → 背包逐格左键 N 次。
+每阶段：Shift 按住 → 货币坐标右键选中 → 移动至背包逐格左键 N 次。
+瓦尔腐化有动画，瓦尔阶段间隔不低于 500ms 兜底，避免漏点。
 中断时不触发整理；失焦或 F12 自动中断并释放 Shift。
 """
 
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 from poe2_tools.config.settings import (
     CURRENCY_NAMES,
+    MAP_MIN_INTERVAL_MS,
     MAP_PHASES,
     Point,
     Settings,
@@ -49,7 +51,7 @@ class MapRunner(ToggleRunner):
             return None
         missing = self.missing_currencies()
         if missing:
-            self.log(f"请先在「坐标」页标定「{missing[0]}」")
+            self.log(f"请先在「坐标」页标定「{missing[0]}」", "WARN")
             return None
         origin = self._check_common()
         if origin is not None:
@@ -57,19 +59,21 @@ class MapRunner(ToggleRunner):
         return origin
 
     def _work(self, origin: Point) -> None:
+        sort = self.settings.general.sort
         driver = batch_ops.BatchDriver()
         aborted = False
         for key, clicks in MAP_PHASES:
             coord = currency_coord(self.settings, key)
             assert coord is not None  # preflight 已校验
+            interval = max(self.settings.general.map_click.interval_ms, MAP_MIN_INTERVAL_MS.get(key, 0))
             if batch_ops.apply_currency_to_bag(
                 coord,
                 clicks,
                 origin,
-                self.settings.cell_size,
-                self.settings.rows,
-                self.settings.cols,
-                self.settings.map_interval_ms,
+                sort.cell_size,
+                sort.rows,
+                sort.cols,
+                interval,
                 self._should_stop,
                 window.is_poe_active,
                 driver,

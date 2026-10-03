@@ -13,7 +13,7 @@
 ├─────────────────────────────────────────────┤
 │ modules/    业务模块（战斗/背包/石碑/地图）    │
 ├─────────────────────────────────────────────┤
-│ core/       硬件级能力（窗口/输入/热键/调度/视觉）│
+│ core/       硬件级能力（窗口/输入/热键/调度）│
 └─────────────────────────────────────────────┘
    config/  配置模型与 ini 读写（横向，各层只读）
    bridge/  进程内事件总线 + 可选 WebSocket（事件分发）
@@ -83,15 +83,6 @@
 - `jitter_ms(base_ms, ratio, rng=None) -> int` — ±ratio 随机抖动，等价 AHK `Jitter()`
 - `clamp(value, lo, hi) -> int`
 
-**`core/vision.py`** — 视觉检测（mss 截图 + OpenCV 模板匹配，FindText 的 Python 替代）。
-
-- `capture_region(x, y, w, h) -> np.ndarray` — mss 抓屏幕小区域（BGR）
-- `match_template(region, template, threshold=0.9) -> bool` — `cv2.matchTemplate`（TM_CCOEFF_NORMED），阈值 0.9 ≈ FindText 容错 10%；常量模板（纯黑/纯白）直接返回 False
-- `has_bright_pixel(region, tolerance=20) -> bool` — 白色像素兜底（数字为纯白，容差 ±20）
-- `load_template(path)` / `grab_template_image(center, radius=30)` — 模板加载与截取（供 UI「截图」按钮）
-- `EdgeTrigger` — 边沿触发器，信号「无 → 有」只触发一次
-- `CycloneWatcher(coords, templates, on_trigger, logger=None, detect_ms=2000)` — Q/E 数字检测后台线程：每 2 秒检测一次，有模板走模板匹配（标定点 ±30px 搜索），否则白色像素兜底（标定点中心 17×19 区域）；全黑帧（截图失败）保持上次状态不误判；`start()` 幂等、`stop()` 停线程
-
 ### 2.3 modules/（业务层）
 
 **`modules/base.py`** — 热键切换式任务基类。
@@ -114,10 +105,10 @@
 
 **`modules/combat.py`** — `CombatMacro`：战斗巡航宏。
 
-- `LOOP_TICK = 0.01`（10ms 调度节拍）；`TEMPLATES_DIR` = 根目录 `templates/`
+- `LOOP_TICK = 0.01`（10ms 调度节拍）
 - `toggle()` / `start()` / `stop()`；`active` 运行状态
 - 启动时按住键（hold）按下并登记，连点键（spam）进 `SpamScheduler`；调度循环每拍到期间隔精确触发，失焦自动停止并在 `finally` 释放全部按住键
-- 旋风页（`active_profile == 5`）：鼠标三键走同一调度，Q/E 由 `CycloneWatcher` 后台线程数字检测、边沿触发 `core_input.press`
+- 旋风页（`active_profile == 5`）：鼠标三键走同一调度
 
 ### 2.4 bridge/（事件分发）
 
@@ -136,7 +127,7 @@
 
 - **`ui/app.py`** — `Poe2ToolsApp(root)` 主窗口与控制器：状态区 + 标签页 + 功能设置区 + 日志区；启动时按需迁移 AHK 旧配置；注册全局热键（战斗/整理/石碑/地图仅 POE2 前台生效，F3/F4 背包标定、F5 记录标定点、F12 全局急停）；`run_app()` 主入口
 - **`ui/profile_tab.py`** — `ProfileTab(notebook, index)` 战斗配置页（8 行按键）
-- **`ui/cyclone_tab.py`** — `CycloneTab(master, on_calibrate, on_screenshot)` 旋风页：鼠标三键策略 + Q/E 标定/截图按钮
+- **`ui/cyclone_tab.py`** — `CycloneTab(master, on_calibrate, on_mapping_start, on_mapping_stop)` 旋风页：鼠标三键策略 + 刷图自动化控制分区（启动/停止、运行状态、Q6 标定）
 - **`ui/coords_tab.py`** — `CoordsTab(master, on_calibrate)` 坐标页：10 种货币标定（双列：左三级货币、右普通货币）
 - **`ui/settings_panel.py`** — `SettingsPanel(master, on_save)` 右侧功能设置区：热键 + 背包/石碑/地图参数 + 保存
 - **`ui/widgets.py`** — 共享小部件 `KeyRowsFrame`（策略下拉 + 间隔输入 + 抖动复选框）与显示名映射、`parse_int`/`clamp`
@@ -150,7 +141,7 @@
 下行消息（模块 → UI）三种：
 
 ```json
-{"type": "log", "message": "str —— 一行日志文本"}
+{"type": "log", "message": "str —— 一行日志文本", "level": "INFO|WARN|ERROR|DEBUG（默认 INFO）"}
 ```
 
 ```json
@@ -293,8 +284,6 @@ JSON Schema：
 | {key}_interval | 执行间隔 ms | LButton = 100，其余 300 | ≥ 50 |
 | {key}_jitter | 随机抖动 ms（实际间隔 = 执行间隔 + 0~抖动值） | 15 | 0-5000（兼容旧版 {key}_random 布尔键：1 → 间隔的 15%） |
 
-另有 Q/E 数字检测标定点（可选）：`q_x`/`q_y`、`e_x`/`e_y`（客户区坐标）。
-
 ### [Currency]（货币坐标）
 
 10 种货币各一组 `{key}_x`/`{key}_y`（可选，未标定不写）：
@@ -319,7 +308,7 @@ JSON Schema：
 
 ### 与 AHK 旧 ini 的迁移关系
 
-启动时若 `poe2_tools.ini` 不存在且存在 `ahk/poe2_key_helper.ini`，自动迁移（`config/migrate.py`）：AHK 旧 ini 为混合编码（UTF-8 BOM + GBK 节名「配置N」），逐行容错解码；模式字段 int（1/2/3）→ 字符串（disabled/spam/hold）；FindText 字库代码（`q_text`/`e_text`）为 AHK 私有格式无法移植，迁移时丢弃，由新版旋风页「截图」按钮重新生成模板图（`templates/q.png`、`e.png`）。迁移不删除源文件。
+启动时若 `poe2_tools.ini` 不存在且存在 `ahk/poe2_key_helper.ini`，自动迁移（`config/migrate.py`）：AHK 旧 ini 为混合编码（UTF-8 BOM + GBK 节名「配置N」），逐行容错解码；模式字段 int（1/2/3）→ 字符串（disabled/spam/hold）；FindText 字库代码（`q_text`/`e_text`）与 Q/E 数字检测标定点为 AHK 私有功能，新版旋风页已移除该功能，迁移时丢弃。迁移不删除源文件。
 
 ## 5. 时间规约表
 
@@ -330,11 +319,6 @@ JSON Schema：
 | 战斗连点默认间隔 | 300ms（LButton 默认连点 100ms） | config/settings.py |
 | 批量操作抖动 | ±30%，范围 5-5000ms | config/settings.py（BATCH_JITTER 等） |
 | 批量操作默认间隔 | 整理 30ms / 石碑 50ms / 地图 50ms | config/settings.py |
-| 旋风 Q/E 检测间隔 | 2000ms（边沿触发） | config/settings.py（CYC_DETECT_MS） |
-| 旋风模板搜索半径 | 标定点 ±30px | config/settings.py（CYC_TEMPLATE_RADIUS） |
-| 模板匹配阈值 | 0.9（≈ FindText 容错 10%） | config/settings.py（CYC_MATCH_THRESHOLD） |
-| 白色像素容差 | ±20（各通道 ≥ 235） | core/vision.py（WHITE_TOLERANCE） |
-| 像素法检测区域 | 标定点中心 17×19 | config/settings.py（CYC_NUM_HW/HH） |
 | 货币级别间距 | 二级 +70px、三级 +140px | config/settings.py（TIER_SPACING） |
 | UI 状态轮询 | 500ms | ui/app.py（STATUS_POLL_MS） |
 
