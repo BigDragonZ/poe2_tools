@@ -20,7 +20,7 @@
   .topnav .item.active { color: #fff; border-bottom: 2px solid #c8aa6e; background: #1a1a1a; }
   .topnav .item.disabled { color: #555; cursor: not-allowed; }
   .layout { display: flex; min-height: calc(100vh - 46px); }
-  /* 左侧边栏（仅赛季） */
+  /* 左侧边栏：二级菜单 + 其下嵌套的三级菜单（页面）；经济页顶部另有赛季切换区 */
   .sidebar { width: 180px; background: #151515; border-right: 1px solid #2c2c2c;
              display: flex; flex-direction: column; }
   .sidebar .half { padding: 8px 0; overflow-y: auto; }
@@ -30,16 +30,15 @@
   .side-item:hover { background: #202020; }
   .side-item.active { background: #2a2a2a; color: #fff; border-left: 3px solid #c8aa6e; }
   .side-item img { width: 22px; height: 22px; }
+  /* 侧边栏菜单层级：二级菜单下嵌套三级菜单（页面） */
+  .sidebar .half.seasons { flex: none; }
+  .sidebar .half.menu { flex: 1; min-height: 0; overflow-y: auto; }
+  .side-l2 { padding: 10px 14px 3px; color: #c8aa6e; font-size: 13px; cursor: default;
+             user-select: none; }
+  .side-item.sub { padding-left: 30px; }
   /* 主区 */
   .main { flex: 1; padding: 16px 20px; overflow-x: auto; }
   .main h2 { margin: 0 0 4px; font-size: 18px; color: #eee; }
-  /* 内容区左侧的经济模块列 */
-  .content-row { display: flex; gap: 18px; align-items: flex-start; }
-  .module-col { width: 170px; flex: none; border: 1px solid #2c2c2c; border-radius: 4px;
-                background: #181818; padding: 6px 0; }
-  .module-col h4 { margin: 4px 12px; color: #777; font-size: 12px; font-weight: normal; }
-  .module-col .side-item { padding: 5px 12px; }
-  .table-col { flex: 1; min-width: 0; }
   .meta-line { color: #999; margin-bottom: 12px; }
   .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
   select, input[type="text"], input[type="date"], input[type="time"], input[type="number"] {
@@ -678,7 +677,7 @@ function TradePage() {
 
 // ---------- 做装页 ----------
 
-// 二级菜单结构：装备部位 → 流程页面
+// 菜单结构：二级菜单（装备部位）→ 三级菜单（页面）
 const CRAFT_MENU = [
   { key: "ring", label: "戒指", pages: [{ key: "ring-rarity", label: "稀有度" }] },
 ];
@@ -778,25 +777,15 @@ function RingRarityFlow() {
   );
 }
 
-function CraftPage({ section }) {
+// 做装页内容区：直接展示当前三级页面（流程图），页面切换在左侧边栏完成
+function CraftPage({ section, page }) {
   const sec = CRAFT_MENU.find(g => g.key === section) || CRAFT_MENU[0];
-  const [craftPage, setCraftPage] = useState(sec.pages[0].key);
-  const curPage = sec.pages.find(p => p.key === craftPage) || sec.pages[0];
+  const curPage = sec.pages.find(p => p.key === page) || sec.pages[0];
   return (
     <div className="main">
       <h2>{sec.label} · {curPage.label}</h2>
-      <div className="meta-line">做装流程记录：左侧边栏选择装备部位，模块列选择目标页面，右侧查看流程图</div>
-      <div className="content-row">
-        <div className="module-col">
-          {sec.pages.map(p => (
-            <div key={p.key} className={"side-item" + (p.key === craftPage ? " active" : "")}
-                 onClick={() => setCraftPage(p.key)}>{p.label}</div>
-          ))}
-        </div>
-        <div className="table-col">
-          {craftPage === "ring-rarity" && <RingRarityFlow/>}
-        </div>
-      </div>
+      <div className="meta-line">做装流程记录：左侧边栏二级菜单选择装备部位，其下三级菜单选择页面</div>
+      {curPage.key === "ring-rarity" && <RingRarityFlow/>}
     </div>
   );
 }
@@ -938,8 +927,11 @@ function LibraryPage({ modules }) {
 }
 
 function App() {
-  const [page, setPage] = useState("economy");  // economy | trade | library | craft
+  // 菜单标准：顶部一级菜单 → 左侧边栏二级菜单 → 二级菜单下嵌套三级菜单（页面）
+  const [page, setPage] = useState("economy");  // 一级菜单：economy | craft
+  const [ecoView, setEcoView] = useState("module");  // 经济三级页面：module | trade | library
   const [craftSection, setCraftSection] = useState("ring");  // 做装二级菜单：装备部位
+  const [craftPage, setCraftPage] = useState("ring-rarity");  // 做装三级菜单：页面
   const [seasons, setSeasons] = useState([]);
   const [seasonId, setSeasonId] = useState(null);
   const [modules, setModules] = useState([]);
@@ -1025,7 +1017,7 @@ function App() {
   return (
     <div>
       <div className="topnav">
-        <div className={"item" + (page !== "craft" ? " active" : "")}
+        <div className={"item" + (page === "economy" ? " active" : "")}
              onClick={() => setPage("economy")}>经济</div>
         <div className="item disabled" title="暂未开放">策略</div>
         <div className={"item" + (page === "craft" ? " active" : "")}
@@ -1035,10 +1027,16 @@ function App() {
       <div className="layout">
         <div className="sidebar">
           {page === "craft" ? (
-          <div className="half">
+          <div className="half menu">
             {CRAFT_MENU.map(g => (
-              <div key={g.key} className={"side-item" + (g.key === craftSection ? " active" : "")}
-                   onClick={() => setCraftSection(g.key)}>{g.label}</div>
+              <React.Fragment key={g.key}>
+                <div className="side-l2">{g.label}</div>
+                {g.pages.map(p => (
+                  <div key={p.key}
+                       className={"side-item sub" + (g.key === craftSection && p.key === craftPage ? " active" : "")}
+                       onClick={() => { setCraftSection(g.key); setCraftPage(p.key); }}>{p.label}</div>
+                ))}
+              </React.Fragment>
             ))}
           </div>
           ) : (
@@ -1048,22 +1046,31 @@ function App() {
             {seasons.length === 0 && <div className="side-item" style={{color: "#666"}}>尚未录入赛季</div>}
             {seasons.map(s => (
               <div key={s.id} className={"side-item" + (s.id === seasonId ? " active" : "")}
-                   onClick={() => { setSeasonId(s.id); setPage("economy"); }}>{s.name}</div>
+                   onClick={() => { setSeasonId(s.id); setEcoView("module"); }}>{s.name}</div>
             ))}
           </div>
-          <div className="half">
-            <h4>工具</h4>
-            <div className={"side-item" + (page === "trade" ? " active" : "")}
-                 onClick={() => setPage("trade")}>交易助手</div>
-            <div className={"side-item" + (page === "library" ? " active" : "")}
-                 onClick={() => setPage("library")}>信息库</div>
+          <div className="half menu">
+            <div className="side-l2">经济模块</div>
+            {modules.map(m => (
+              <div key={m.slug}
+                   className={"side-item sub" + (ecoView === "module" && m.slug === moduleSlug ? " active" : "")}
+                   onClick={() => { setEcoView("module"); setModuleSlug(m.slug); }}>
+                {m.icon_path && <img src={m.icon_path} alt=""/>}
+                <span>{m.name_zh}</span>
+              </div>
+            ))}
+            <div className="side-l2">工具</div>
+            <div className={"side-item sub" + (ecoView === "trade" ? " active" : "")}
+                 onClick={() => setEcoView("trade")}>交易助手</div>
+            <div className={"side-item sub" + (ecoView === "library" ? " active" : "")}
+                 onClick={() => setEcoView("library")}>信息库</div>
           </div>
           </React.Fragment>
           )}
         </div>
-        {page === "craft" ? <CraftPage section={craftSection}/> :
-         page === "trade" ? <TradePage/> :
-         page === "library" ? <LibraryPage modules={modules}/> :
+        {page === "craft" ? <CraftPage section={craftSection} page={craftPage}/> :
+         ecoView === "trade" ? <TradePage/> :
+         ecoView === "library" ? <LibraryPage modules={modules}/> :
         <div className="main">
           <h2>{curModule ? curModule.name_zh : moduleSlug}</h2>
           <div className="meta-line">
@@ -1099,24 +1106,10 @@ function App() {
           <SeasonPanel onCreated={s => {
             api("/api/seasons").then(list => { setSeasons(list); setSeasonId(s.id); });
           }}/>
-          <div className="content-row">
-            <div className="module-col">
-              <h4>经济模块</h4>
-              {modules.map(m => (
-                <div key={m.slug} className={"side-item" + (m.slug === moduleSlug ? " active" : "")}
-                     onClick={() => setModuleSlug(m.slug)}>
-                  {m.icon_path && <img src={m.icon_path} alt=""/>}
-                  <span>{m.name_zh}</span>
-                </div>
-              ))}
-            </div>
-            <div className="table-col">
-              {data && data.items && data.items.length > 0 ?
-                <EcoTable items={data.items} refIcons={data.ref_icons || {}}
-                          search={search} sort={sort} onSort={onSort}/> :
-                <div className="empty">暂无数据，请点击刷新本模块抓取</div>}
-            </div>
-          </div>
+          {data && data.items && data.items.length > 0 ?
+            <EcoTable items={data.items} refIcons={data.ref_icons || {}}
+                      search={search} sort={sort} onSort={onSort}/> :
+            <div className="empty">暂无数据，请点击刷新本模块抓取</div>}
         </div>}
       </div>
     </div>

@@ -55,11 +55,14 @@ def main():
         check("一级菜单（经济/策略/做装/开荒）", nav_texts == ["经济", "策略", "做装", "开荒"],
               str(nav_texts))
 
-        # 3. 内容区左侧三级菜单：14 个经济模块
-        module_items = page.locator(".module-col .side-item")
-        check("经济模块数量=14", module_items.count() == 14, f"实际 {module_items.count()}")
-        check("模块列在主内容区左侧、边栏仅含赛季",
-              page.locator(".main .module-col").count() == 1 and
+        # 3. 左侧边栏：二级菜单（经济模块/工具）+ 其下嵌套的三级菜单（页面）
+        l2_texts = page.locator(".sidebar .side-l2").all_inner_texts()
+        check("经济页侧边栏二级菜单（经济模块/工具）", l2_texts == ["经济模块", "工具"], str(l2_texts))
+        module_items = page.locator(".sidebar .side-item.sub")
+        check("三级菜单=14 经济模块 + 2 工具页面", module_items.count() == 16,
+              f"实际 {module_items.count()}")
+        check("三级菜单嵌套在侧边栏、主内容区无模块列",
+              page.locator(".main .module-col").count() == 0 and
               page.locator(".sidebar .module-col").count() == 0)
 
         # 4. 赛季列表存在且默认选中
@@ -70,7 +73,7 @@ def main():
               active_season.inner_text() if active_season.count() else "无选中")
 
         # 5. 切换到「通貨」模块，等待表格数据
-        page.locator(".module-col .side-item", has_text="通貨").first.click()
+        page.locator(".sidebar .side-item.sub", has_text="通貨").first.click()
         page.wait_for_selector("table.eco tbody tr", timeout=10000)
         row_count = page.locator("table.eco tbody tr").count()
         check("通貨模块表格有数据", row_count > 0, f"{row_count} 行")
@@ -171,19 +174,27 @@ def main():
         check("刷新后表格仍有数据", page.locator("table.eco tbody tr").count() > 0)
         page.screenshot(path=str(SHOTS_DIR / "04_after_refresh.png"), full_page=True)
 
-        # 14. 做装页：一级菜单可点击，侧边栏二级菜单「戒指」→ 模块列页面「稀有度」流程图
+        # 14. 工具区三级页面：信息库可达，返回经济模块
+        page.locator(".sidebar .side-item.sub", has_text="信息库").click()
+        page.wait_for_selector(".main h2", timeout=5000)
+        check("三级页面「信息库」可达", page.locator(".main h2").inner_text() == "信息库")
+        page.locator(".sidebar .side-item.sub", has_text="通貨").first.click()
+        page.wait_for_selector("table.eco tbody tr", timeout=10000)
+
+        # 15. 做装页：一级菜单可点击，侧边栏二级菜单「戒指」下嵌套三级菜单「稀有度」，内容区直接展示流程图
         page.locator(".topnav .item", has_text="做装").click()
         page.wait_for_selector(".flow", timeout=5000)
         check("做装页加载流程图", page.locator(".flow").count() == 1)
         check("做装二级菜单在侧边栏（戒指）",
-              page.locator(".sidebar .half:not(.seasons) .side-item").all_inner_texts() == ["戒指"] and
-              page.locator(".sidebar .half.seasons").count() == 0 and
-              page.locator(".sidebar h4").count() == 0,
-              str(page.locator(".sidebar .side-item").all_inner_texts()))
-        check("做装三级菜单在模块列（稀有度）",
-              page.locator(".module-col .side-item").all_inner_texts() == ["稀有度"] and
-              page.locator(".module-col .side-item.active").inner_text() == "稀有度" and
-              page.locator(".module-col h4").count() == 0)
+              page.locator(".sidebar .side-l2").all_inner_texts() == ["戒指"] and
+              page.locator(".sidebar .half.seasons").count() == 0,
+              str(page.locator(".sidebar .side-l2").all_inner_texts()))
+        check("做装三级菜单嵌套在二级菜单下（稀有度）",
+              page.locator(".sidebar .side-item.sub").all_inner_texts() == ["稀有度"] and
+              page.locator(".sidebar .side-item.sub.active").inner_text() == "稀有度")
+        check("做装内容区无模块列，流程图直接展示",
+              page.locator(".main .module-col").count() == 0 and
+              page.locator(".main .flow").count() == 1)
         check("流程图操作模块节点=3",
               page.locator(".flow-node.module").count() == 3,
               f"实际 {page.locator('.flow-node.module').count()}")
@@ -200,13 +211,13 @@ def main():
 
         browser.close()
 
-    # 15. 清理测试赛季
+    # 16. 清理测试赛季
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute("DELETE FROM seasons WHERE name = 'UI自动化测试赛季'")
         conn.commit()
         check("清理测试赛季", cur.rowcount == 1)
 
-    # 16. 浏览器控制台无报错
+    # 17. 浏览器控制台无报错
     real_errors = [e for e in console_errors if "favicon" not in e]
     check("浏览器控制台无报错", not real_errors, str(real_errors[:3]))
 
