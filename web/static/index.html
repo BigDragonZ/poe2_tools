@@ -81,6 +81,26 @@
              animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 6px; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .status-line { color: #c8aa6e; font-size: 12px; }
+  /* 做装流程图 */
+  .flow { display: flex; flex-direction: column; align-items: stretch; }
+  .flow-center { display: flex; flex-direction: column; align-items: center; }
+  .flow-node { border: 1px solid #444; border-radius: 6px; background: #1f1f1f;
+               padding: 10px 14px; width: 100%; max-width: 430px; }
+  .flow-node .flow-title { color: #c8aa6e; margin-bottom: 6px; }
+  .flow-node.goal { border-color: #c8aa6e; }
+  .flow-node.module { border-color: #5b7fa6; }
+  .flow-node.decision { border-color: #8a6ec8; }
+  .flow-node.warn { border-color: #a5533a; }
+  .flow-node.done { border-color: #3a8a4a; }
+  .flow-node ol { margin: 4px 0 0; padding-left: 20px; }
+  .flow-node li { margin: 5px 0; }
+  .flow-note { color: #999; font-size: 12px; margin: 3px 0 0 14px; }
+  .flow-arrow { display: flex; flex-direction: column; align-items: center; padding: 2px 0; }
+  .flow-arrow .line { width: 2px; height: 18px; background: #555; }
+  .flow-arrow .head { width: 0; height: 0; border: 5px solid transparent; border-top: 7px solid #555; }
+  .flow-arrow .lbl { color: #c8aa6e; font-size: 12px; margin-top: 2px; }
+  .flow-branches { display: flex; gap: 16px; align-items: flex-start; justify-content: center; }
+  .flow-branch { display: flex; flex-direction: column; align-items: center; width: 360px; flex: none; }
 </style>
 </head>
 <body>
@@ -656,6 +676,134 @@ function TradePage() {
   );
 }
 
+// ---------- 做装页 ----------
+
+// 二级菜单结构：装备部位 → 流程页面
+const CRAFT_MENU = [
+  { key: "ring", label: "戒指", pages: [{ key: "ring-rarity", label: "稀有度" }] },
+];
+
+function FlowArrow({ label }) {
+  return (
+    <div className="flow-arrow">
+      <div className="line"></div>
+      <div className="head"></div>
+      {label && <div className="lbl">{label}</div>}
+    </div>
+  );
+}
+
+function FlowNode({ tone, title, children }) {
+  return (
+    <div className={"flow-node" + (tone ? " " + tone : "")}>
+      {title && <div className="flow-title">{title}</div>}
+      {children}
+    </div>
+  );
+}
+
+// 戒指 · 稀有度：52% 稀有度 + 双 T1 点伤 + 抗性戒指
+function RingRarityFlow() {
+  return (
+    <div className="flow">
+      <div className="flow-center">
+        <FlowNode tone="goal" title="目标">
+          52% 稀有度 + 双 T1 点伤 + 抗性戒指
+        </FlowNode>
+        <FlowArrow/>
+        <FlowNode tone="module" title="模块 1 ｜ 底材">
+          <ol>
+            <li>购买锁后缀的 T1 稀有度「金光戒指」（82 物等底材）
+              <div className="flow-note">
+                注意：后续要用品质工艺，锁的词条必须是非工艺词条 —— 按住 Alt 可查看词条是否为工艺词条
+              </div>
+            </li>
+            <li>使用剥离石，剥离到只剩「一条词缀 + 锁的词缀」</li>
+            <li>使用混沌石开始 C</li>
+          </ol>
+        </FlowNode>
+        <FlowArrow/>
+        <FlowNode tone="decision" title="判定">混沌石 C 出的最好词条是？</FlowNode>
+      </div>
+      <div className="flow-branches">
+        <div className="flow-branch">
+          <FlowArrow label="T1 点伤（最佳）"/>
+          <FlowNode tone="module" title="模块 2.1 ｜ 双点伤 + 品质">
+            <ol>
+              <li>完美崇高石 + 左旋 + 攻击（掠夺）催化剂「喜悦」
+                <div className="flow-note">
+                  出 T2 点伤：批量做或自用都可保留；不想要就剥离重来 —— 剥离错了需重复模块 1 → 本步，成本较高
+                </div>
+              </li>
+              <li>右旋 + 普通崇高石，打一个后缀</li>
+              <li>购买品质精华 → 右旋结晶：用精华吃掉第 2 步的后缀，打上品质精华（+20% 品质）
+                <div className="flow-note">备注 1：用攻击催化剂打满 40 品质，确保攻击词缀都能吃到加成</div>
+                <div className="flow-note">备注 2：缺抗性可换对应抗性催化剂，对应点伤 + 对应抗性（全抗）都能享受催化剂效果</div>
+              </li>
+              <li>削切 + 混沌石：若 C 出前缀则继续削切，直到出现后缀
+                <div className="flow-note">备注 1：+20% 品质是 C 词条、最低级别词条，削切必定吃掉它（同类还有深渊解密词条）</div>
+                <div className="flow-note">备注 2：用普通混沌石确保出现的是低等级词缀，削切可精准命中</div>
+              </li>
+              <li>前缀「古老的骨头」+ 左旋死灵，占掉前缀词条（可先解密，也可最后解密）</li>
+            </ol>
+          </FlowNode>
+          <FlowArrow/>
+          <FlowNode tone="module" title="模块 3 ｜ 洗后缀">
+            <ol>
+              <li>检查后缀是否满意；不满意则先看是否缺抗性</li>
+              <li>缺抗性 → 参照模块 2.1 备注 2，换对应抗性催化剂补抗性</li>
+              <li>不缺抗性 → 右旋结晶 + 迅捷合金：吃掉模块 2.1 第 4 步 C 出的后缀，打上攻击速度</li>
+              <li>完美崇高石 E 一手，查看结果</li>
+              <li>不理想 → 右旋废止 + 剥离，洗掉一条后缀</li>
+              <li>回到第 1 步重复，直到洗出想要的后缀</li>
+            </ol>
+          </FlowNode>
+          <FlowArrow label="后缀满意"/>
+          <FlowNode tone="done" title="完成">52% 稀有度 + 双 T1 点伤 + 抗性戒指</FlowNode>
+        </div>
+        <div className="flow-branch">
+          <FlowArrow label="T1 前缀稀有"/>
+          <FlowNode tone="warn" title="分支 2.2 ｜ 放弃双点伤">
+            不要强行做双 T1 点伤戒指 —— 后续「古老的骨头」解密成本太高。
+          </FlowNode>
+        </div>
+        <div className="flow-branch">
+          <FlowArrow label="T1 全抗"/>
+          <FlowNode tone="warn" title="分支 2.3 ｜ 看经济条件">
+            经济条件不好就按「T1 前缀稀有」同样处理，不强行投入。
+          </FlowNode>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CraftPage() {
+  const [craftPage, setCraftPage] = useState("ring-rarity");
+  return (
+    <div className="main">
+      <h2>做装</h2>
+      <div className="meta-line">做装流程记录：左侧选择装备部位与目标页面，右侧查看流程图</div>
+      <div className="content-row">
+        <div className="module-col">
+          {CRAFT_MENU.map(g => (
+            <div key={g.key}>
+              <h4>{g.label}</h4>
+              {g.pages.map(p => (
+                <div key={p.key} className={"side-item" + (p.key === craftPage ? " active" : "")}
+                     onClick={() => setCraftPage(p.key)}>{p.label}</div>
+              ))}
+            </div>
+          ))}
+        </div>
+        <div className="table-col">
+          {craftPage === "ring-rarity" && <RingRarityFlow/>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------- 信息库页 ----------
 
 function LibraryPage({ modules }) {
@@ -793,7 +941,7 @@ function LibraryPage({ modules }) {
 }
 
 function App() {
-  const [page, setPage] = useState("economy");  // economy | trade | library
+  const [page, setPage] = useState("economy");  // economy | trade | library | craft
   const [seasons, setSeasons] = useState([]);
   const [seasonId, setSeasonId] = useState(null);
   const [modules, setModules] = useState([]);
@@ -879,12 +1027,15 @@ function App() {
   return (
     <div>
       <div className="topnav">
-        <div className="item active">经济</div>
+        <div className={"item" + (page !== "craft" ? " active" : "")}
+             onClick={() => setPage("economy")}>经济</div>
         <div className="item disabled" title="暂未开放">策略</div>
-        <div className="item disabled" title="暂未开放">做装</div>
+        <div className={"item" + (page === "craft" ? " active" : "")}
+             onClick={() => setPage("craft")}>做装</div>
         <div className="item disabled" title="暂未开放">开荒</div>
       </div>
       <div className="layout">
+        {page !== "craft" &&
         <div className="sidebar">
           <div className="half seasons">
             <h4>赛季</h4>
@@ -901,8 +1052,9 @@ function App() {
             <div className={"side-item" + (page === "library" ? " active" : "")}
                  onClick={() => setPage("library")}>信息库</div>
           </div>
-        </div>
-        {page === "trade" ? <TradePage/> :
+        </div>}
+        {page === "craft" ? <CraftPage/> :
+         page === "trade" ? <TradePage/> :
          page === "library" ? <LibraryPage modules={modules}/> :
         <div className="main">
           <h2>{curModule ? curModule.name_zh : moduleSlug}</h2>

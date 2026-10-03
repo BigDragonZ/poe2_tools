@@ -102,12 +102,12 @@ def main():
         page.locator("th.sortable", has_text="Last 7 days").click()
         page.wait_for_timeout(300)
         pcts = page.locator("table.eco tbody tr td:nth-child(3) span").all_inner_texts()
-        nums = [float(t.replace("%", "").replace("+", "")) for t in pcts]
+        nums = [float(t.replace("%", "").replace("+", "")) for t in pcts if t.strip() not in ("", "-")]
         check("按涨跌幅降序", nums == sorted(nums, reverse=True), str(nums[:5]))
         page.locator("th.sortable", has_text="Last 7 days").click()
         page.wait_for_timeout(300)
         pcts2 = page.locator("table.eco tbody tr td:nth-child(3) span").all_inner_texts()
-        nums2 = [float(t.replace("%", "").replace("+", "")) for t in pcts2]
+        nums2 = [float(t.replace("%", "").replace("+", "")) for t in pcts2 if t.strip() not in ("", "-")]
         check("再次点击切换为升序", nums2 == sorted(nums2), str(nums2[:5]))
 
         # 9. 按交易量排序
@@ -171,15 +171,39 @@ def main():
         check("刷新后表格仍有数据", page.locator("table.eco tbody tr").count() > 0)
         page.screenshot(path=str(SHOTS_DIR / "04_after_refresh.png"), full_page=True)
 
+        # 14. 做装页：一级菜单可点击，二级菜单「戒指」→ 页面「稀有度」流程图
+        page.locator(".topnav .item", has_text="做装").click()
+        page.wait_for_selector(".flow", timeout=5000)
+        check("做装页加载流程图", page.locator(".flow").count() == 1)
+        check("做装二级菜单（戒指）",
+              page.locator(".module-col h4").all_inner_texts() == ["戒指"],
+              str(page.locator(".module-col h4").all_inner_texts()))
+        check("做装页面（稀有度）",
+              page.locator(".module-col .side-item.active").inner_text() == "稀有度")
+        check("流程图操作模块节点=3",
+              page.locator(".flow-node.module").count() == 3,
+              f"实际 {page.locator('.flow-node.module').count()}")
+        check("流程图判定/分支/目标/完成节点",
+              page.locator(".flow-node.decision").count() == 1 and
+              page.locator(".flow-node.warn").count() == 2 and
+              page.locator(".flow-node.goal").count() == 1 and
+              page.locator(".flow-node.done").count() == 1)
+        check("做装页无赛季侧边栏", page.locator(".sidebar").count() == 0)
+        page.screenshot(path=str(SHOTS_DIR / "05_craft_ring_rarity.png"), full_page=True)
+        # 返回经济页
+        page.locator(".topnav .item", has_text="经济").click()
+        page.wait_for_selector(".sidebar", timeout=5000)
+        check("返回经济页侧边栏恢复", page.locator(".sidebar").count() == 1)
+
         browser.close()
 
-    # 14. 清理测试赛季
+    # 15. 清理测试赛季
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute("DELETE FROM seasons WHERE name = 'UI自动化测试赛季'")
         conn.commit()
         check("清理测试赛季", cur.rowcount == 1)
 
-    # 15. 浏览器控制台无报错
+    # 16. 浏览器控制台无报错
     real_errors = [e for e in console_errors if "favicon" not in e]
     check("浏览器控制台无报错", not real_errors, str(real_errors[:3]))
 
