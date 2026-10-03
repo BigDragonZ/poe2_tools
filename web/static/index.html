@@ -788,7 +788,6 @@ function CraftPage({ section }) {
       <div className="meta-line">做装流程记录：左侧边栏选择装备部位，模块列选择目标页面，右侧查看流程图</div>
       <div className="content-row">
         <div className="module-col">
-          <h4>{sec.label}</h4>
           {sec.pages.map(p => (
             <div key={p.key} className={"side-item" + (p.key === craftPage ? " active" : "")}
                  onClick={() => setCraftPage(p.key)}>{p.label}</div>
@@ -1037,7 +1036,6 @@ function App() {
         <div className="sidebar">
           {page === "craft" ? (
           <div className="half">
-            <h4>做装</h4>
             {CRAFT_MENU.map(g => (
               <div key={g.key} className={"side-item" + (g.key === craftSection ? " active" : "")}
                    onClick={() => setCraftSection(g.key)}>{g.label}</div>

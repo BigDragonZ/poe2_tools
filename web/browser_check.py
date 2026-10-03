@@ -177,11 +177,13 @@ def main():
         check("做装页加载流程图", page.locator(".flow").count() == 1)
         check("做装二级菜单在侧边栏（戒指）",
               page.locator(".sidebar .half:not(.seasons) .side-item").all_inner_texts() == ["戒指"] and
-              page.locator(".sidebar .half.seasons").count() == 0,
+              page.locator(".sidebar .half.seasons").count() == 0 and
+              page.locator(".sidebar h4").count() == 0,
               str(page.locator(".sidebar .side-item").all_inner_texts()))
-        check("做装页面列（稀有度）",
-              page.locator(".module-col h4").inner_text() == "戒指" and
-              page.locator(".module-col .side-item.active").inner_text() == "稀有度")
+        check("做装三级菜单在模块列（稀有度）",
+              page.locator(".module-col .side-item").all_inner_texts() == ["稀有度"] and
+              page.locator(".module-col .side-item.active").inner_text() == "稀有度" and
+              page.locator(".module-col h4").count() == 0)
         check("流程图操作模块节点=3",
               page.locator(".flow-node.module").count() == 3,
               f"实际 {page.locator('.flow-node.module').count()}")
