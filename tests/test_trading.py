@@ -436,3 +436,34 @@ def test_best_arbitrage_round_none():
         rate("chaos", "divine", 300, 1, "buy"),
     ]
     assert trading.best_arbitrage_round(rates, {"chaos": 50}) is None
+
+
+# ---------- 套利汇率图：指定/自动并入默认比例 ----------
+
+def test_rates_for_arbitrage_merges_default_for_custom():
+    custom = [rate("item:X", "chaos", 1, 11, "buy")]
+    default = [rate("chaos", "divine", 300, 1, "buy")]
+    assert trading.rates_for_arbitrage(custom, default, "custom") == custom + default
+    assert trading.rates_for_arbitrage(custom, default, "auto") == custom + default
+    # default 类别不并入（避免重复）
+    assert trading.rates_for_arbitrage(default, default, "default") == default
+
+
+def test_custom_only_round_trip_never_profitable_but_merged_cycle_is():
+    """指定类别的物品⇄单通货往返必亏（买卖价差），盈利环需并入默认比例闭环。
+
+    复现真实场景（Kolr's Hunt）：1 神圣买 1 物品、1 物品卖 11 混沌，
+    默认页 10.27 混沌买 1 神圣 → 环 神圣→物品→混沌→神圣 = 11/10.27 ≈ 1.071。
+    """
+    custom = [
+        rate("divine", "item:Kolr's Hunt", 1, 1, "buy"),
+        rate("item:Kolr's Hunt", "chaos", 1, 11, "buy"),
+        rate("chaos", "item:Kolr's Hunt", 12, 1, "buy"),
+    ]
+    default = [rate("chaos", "divine", 10.27, 1, "buy")]
+    # 仅指定类别：物品⇄混沌往返 11/12 < 1，无盈利环
+    assert trading.find_profitable_cycles(custom) == []
+    merged = trading.rates_for_arbitrage(custom, default, "custom")
+    cycles = trading.find_profitable_cycles(merged)
+    assert len(cycles) == 1
+    assert abs(cycles[0]["rate"] - 11 / 10.27) < 1e-9

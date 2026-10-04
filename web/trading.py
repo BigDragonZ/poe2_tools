@@ -342,6 +342,18 @@ def arbitrage_opportunities(rates, gold_values):
 
 # ---------- 每轮口径最优套利方案 ----------
 
+def rates_for_arbitrage(latest, default_latest, category):
+    """套利计算的汇率图：指定/自动类别并入默认类别的三通货基础比例。
+
+    物品×单通货的往返必然亏损（市场买卖价差），盈利环需经默认通货间的边
+    闭环（如 物品→混沌→神圣→物品），而默认通货间的比例只在 default 类别。
+    default 类别直接用自身比例。
+    """
+    if category == "default":
+        return list(latest)
+    return list(latest) + list(default_latest)
+
+
 def best_arbitrage_round(rates, gold_values):
     """每轮口径最优套利方案：金币效率最高的兑换环，以 1 单位起点通货为一轮展开。
 

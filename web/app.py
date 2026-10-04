@@ -277,21 +277,28 @@ def api_trade_state(category: str = "default"):
 
     套利核心是金币换通货（不关注持仓）：方案以 1 单位起点通货为一轮，
     收益看通货互换价差，效率看每 1 万金币净得多少神圣当量。
+    指定/自动类别的套利计算并入默认类别三通货基础比例（物品×单通货的
+    往返必然亏损，盈利环需经默认通货间的边闭环）。
     category 对应交易菜单三级页面：default（默认）/ custom（指定）/ auto（自动），
     数据由游玩工具交易模块对应子标签抓取同步（桌面端直接写库，本页面只读展示）。
     """
     if category not in db.TRADE_CATEGORIES:
         raise HTTPException(400, "category 取值 default|custom|auto")
     latest = db.latest_trade_rates(category)
-    gold_values = _gold_values(latest)
+    # 套利计算的汇率图：指定/自动类别并入默认类别的三通货基础比例——
+    # 物品×单通货的往返必然亏损（买卖价差），盈利环需经默认通货间的边闭环
+    # （如 物品→混沌→神圣→物品）；市场比例表仍只展示本类别数据
+    arb_rates = trading.rates_for_arbitrage(
+        latest, db.latest_trade_rates("default"), category)
+    gold_values = _gold_values(arb_rates)
     gv = {u: g["value"] for u, g in gold_values.items() if g["value"]}
     return {
         "category": category,
         "latest": latest,
-        "arb_plan": trading.best_arbitrage_round(latest, gv),
-        "opportunities": trading.arbitrage_opportunities(latest, gv)[:10],
-        "unit_labels": _unit_labels(latest),
-        "unit_icons": _trade_unit_icons(latest),
+        "arb_plan": trading.best_arbitrage_round(arb_rates, gv),
+        "opportunities": trading.arbitrage_opportunities(arb_rates, gv)[:10],
+        "unit_labels": _unit_labels(arb_rates),
+        "unit_icons": _trade_unit_icons(arb_rates),
     }
 
 
