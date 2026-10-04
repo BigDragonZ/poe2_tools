@@ -5,7 +5,7 @@
 流程：load_candidates() 从 Web 经济数据（通货模块快照）筛选价值区间内的候选
 通货 → auto_pairs() 生成 候选 × 三默认通货 的抓取对 → 复用
 ExchangeScanRunner（category="auto"）批量抓取并同步 Web「交易 → 自动」页；
-最佳金币获取方案与套利方案由交易页面（/api/trade/state）按最新汇率现算。
+每轮口径最佳套利方案由交易页面（/api/trade/state）按最新汇率现算。
 
 桌面端与 Web 应用为独立进程，web.* 一律延迟导入（与 publish_rates 先例一致）。
 """
@@ -59,7 +59,7 @@ def candidates_missing_gold_costs(candidates: list[dict], db_path=None) -> list[
 
     按归一化名称（canon_item_name）匹配，抹平撇号等标点差异（信息库 wiki 名
     Perfect Jeweller's Orb ↔ 游戏内搜索名 Perfect Jewellers Orb）。
-    缺失通货的金币口径计算（金币获取方案/金币费）会为 None，仅作警告。
+    缺失通货的金币口径计算（套利方案的金币费/转换率）会为 None，仅作警告。
     """
     from web import db, trading
 

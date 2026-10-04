@@ -195,16 +195,6 @@ class GoldValuesIn(BaseModel):
     divine: float | None = None
 
 
-# 套利持仓：神圣/混沌/崇高为本金，金币为预算（settings 键 trade_holding:<unit>）
-HOLDING_UNITS = ("divine", "chaos", "exalted", "gold")
-
-
-def _holdings():
-    """当前持仓（神圣/混沌/崇高/金币），未设置按 0。"""
-    return {u: float(db.get_setting("trade_holding:" + u) or 0)
-            for u in HOLDING_UNITS}
-
-
 def _unit_labels(rates):
     """rates 出现的全部单位 → {"zh", "en"}（单位双名展示用）。
 
@@ -282,10 +272,11 @@ def _gold_values(rates=None):
 
 @app.get("/api/trade/state")
 def api_trade_state(category: str = "default"):
-    """交易页全量状态：最新汇率、历史、最优方案、最优套利方案（含独立复核）、
-    金币获取方案、持仓与持仓口径套利方案（arb_plan）、套利机会列表、单位双名、
-    金币转化比例。
+    """交易页全量状态：最新汇率、每轮口径最佳套利方案（含独立复核）、
+    套利机会列表、单位双名与图标。
 
+    套利核心是金币换通货（不关注持仓）：方案以 1 单位起点通货为一轮，
+    收益看通货互换价差，效率看每 1 万金币净得多少神圣当量。
     category 对应交易菜单三级页面：default（默认）/ custom（指定）/ auto（自动），
     数据由游玩工具交易模块对应子标签抓取同步（桌面端直接写库，本页面只读展示）。
     """
@@ -294,48 +285,14 @@ def api_trade_state(category: str = "default"):
     latest = db.latest_trade_rates(category)
     gold_values = _gold_values(latest)
     gv = {u: g["value"] for u, g in gold_values.items() if g["value"]}
-    # 最优兑换：基础通货 + 该类别汇率中出现的物品单位，两两计算
-    item_units = sorted({
-        u for r in latest for u in (r["from_unit"], r["to_unit"])
-        if trading.is_item_unit(u)
-    })
-    units = trading.BASE_CURRENCIES + item_units
-    best = {}
-    for src in units:
-        for dst in units:
-            if src == dst:
-                continue
-            rate, path = trading.best_conversion(latest, src, dst, gv)
-            if rate is not None:
-                best[src + ">" + dst] = {"rate": rate, "path": path}
-    arbitrage = trading.best_arbitrage(latest, gv)
-    holdings = _holdings()
     return {
         "category": category,
-        "base_currencies": [{"unit": u, "label": trading.BASE_LABELS[u]}
-                            for u in trading.BASE_CURRENCIES],
         "latest": latest,
-        "history": db.list_trade_rates(30, category),
-        "best": best,
-        "arbitrage": arbitrage,
-        "arbitrage_check": (trading.verify_arbitrage_plan(latest, gv, arbitrage)
-                            if arbitrage else None),
-        "gold_plans": trading.best_gold_plans(latest, gv),
-        "holdings": holdings,
+        "arb_plan": trading.best_arbitrage_round(latest, gv),
         "opportunities": trading.arbitrage_opportunities(latest, gv)[:10],
-        "arb_plan": trading.best_arbitrage_plan(latest, gv, holdings),
         "unit_labels": _unit_labels(latest),
-        "gold_values": gold_values,
-        "gold_conversion": trading.gold_conversion(latest, gv),
         "unit_icons": _trade_unit_icons(latest),
     }
-
-
-@app.delete("/api/trade/rates/{rate_id}")
-def api_delete_trade_rate(rate_id: int):
-    if not db.delete_trade_rate(rate_id):
-        raise HTTPException(404, "汇率记录不存在")
-    return {"ok": True}
 
 
 @app.put("/api/trade/gold_values")
@@ -345,22 +302,6 @@ def api_put_gold_values(body: GoldValuesIn):
         v = getattr(body, u)
         db.set_setting("trade_gold_value:" + u, str(v) if v and v > 0 else "")
     return _gold_values()
-
-
-class HoldingsIn(BaseModel):
-    divine: float | None = None
-    chaos: float | None = None
-    exalted: float | None = None
-    gold: float | None = None
-
-
-@app.put("/api/trade/holdings")
-def api_put_holdings(body: HoldingsIn):
-    """保存套利持仓（神圣/混沌/崇高本金 + 金币预算）。None 或 <=0 = 清除为 0。"""
-    for u in HOLDING_UNITS:
-        v = getattr(body, u)
-        db.set_setting("trade_holding:" + u, str(v) if v and v > 0 else "")
-    return _holdings()
 
 
 # ---------- 信息库 ----------

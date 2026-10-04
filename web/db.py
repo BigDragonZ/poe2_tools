@@ -413,12 +413,6 @@ def latest_trade_rates(category=None, db_path=None):
         return [dict(r) for r in rows]
 
 
-def delete_trade_rate(rate_id, db_path=None):
-    with _DB_LOCK, _connect(db_path) as conn:
-        cur = conn.execute("DELETE FROM trade_rates WHERE id = ?", (rate_id,))
-        return cur.rowcount > 0
-
-
 def get_item_icons_by_names(names, db_path=None):
     """按物品中文名查本地图标路径，返回 {name_zh: icon_path}。"""
     if not names:

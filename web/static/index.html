@@ -332,207 +332,121 @@ function UnitIcon({ unit, icons }) {
                     title={unitLabel(unit)}/> : null;
 }
 
-// 路径展示：A →(1:r) B →(1:r) C
-function PathView({ path, icons }) {
-  if (!path || path.length === 0) return null;
-  return (
-    <span>
-      {path.map((e, i) => (
-        <span key={i}>
-          {i === 0 && <span><UnitIcon unit={e.from_unit} icons={icons}/> {unitLabel(e.from_unit)}</span>}
-          <span className="swap">→</span>
-          <UnitIcon unit={e.to_unit} icons={icons}/> {unitLabel(e.to_unit)}
-          <span style={{color: "#777", fontSize: 11}}>
-            {" (1:" + fmtNum(e.amount_to / e.amount_from, 3) + ")"}
-          </span>
-          {e.side === "buy" &&
-            <span style={{color: "#c8aa6e", fontSize: 11}} title="市场买入，已折算金币费"> [买]</span>}
-        </span>
-      ))}
-    </span>
-  );
-}
-
-// 通货 Currency Exchange 值（金币/个）：手动覆盖优先，否则用信息库抓取值
-function GoldValueForm({ state, reload }) {
-  const [form, setForm] = useState(null);
-  const [msg, setMsg] = useState("");
-  useEffect(() => {
-    const f = {};
-    BASE_CURS.forEach(c => {
-      const g = (state.gold_values || {})[c.unit] || {};
-      f[c.unit] = g.value !== null && g.value !== undefined ? String(g.value) : "";
-    });
-    setForm(f);
-  }, [state.gold_values]);
-  if (!form) return null;
-  const save = () => {
-    const body = {};
-    BASE_CURS.forEach(c => { body[c.unit] = Number(form[c.unit]) || null; });
-    api("/api/trade/gold_values", {method: "PUT", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify(body)})
-      .then(() => { setMsg("已保存"); reload(); setTimeout(() => setMsg(""), 1500); })
-      .catch(e => setMsg("保存失败：" + e.message));
+// 最新比例表：按通货对合并成一行，A→B / B→A 两个方向并排、各分买/卖，方便双向对比
+function RatesTable({ state }) {
+  // 单位排序：三种默认通货按 BASE_CURS 顺序在前，其余按名称
+  const unitRank = u => {
+    const i = BASE_CURS.findIndex(c => c.unit === u);
+    return i >= 0 ? String(i).padStart(2, "0") : "9" + u;
   };
-  return (
-    <div className="row">
-      <span style={{color: "#999"}}>Currency Exchange 值（金币/个）：</span>
-      {BASE_CURS.map(c => {
-        const g = (state.gold_values || {})[c.unit] || {};
-        return (
-          <span key={c.unit}>
-            <UnitIcon unit={c.unit} icons={state.unit_icons}/> {c.label}
-            <input type="number" style={{width: 80, margin: "0 4px"}} min="0" step="any"
-              value={form[c.unit]}
-              onChange={e => setForm({...form, [c.unit]: e.target.value})}/>
-            {g.source === "library" && <span style={{color: "#777", fontSize: 11}}>(信息库)</span>}
-          </span>
-        );
-      })}
-      <button onClick={save}>保存</button>
-      <span className="status-line">{msg}</span>
-    </div>
-  );
-}
-
-// 金币 ⇄ 通货转化比例（由 VE + 最优路径推导）
-function GoldConvTable({ state }) {
-  const rows = state.gold_conversion || [];
-  if (!rows.some(r => r.gold_per_unit)) return null;
+  const groups = {};
+  const order = [];
+  state.latest.forEach(r => {
+    const key = [r.from_unit, r.to_unit].sort().join("<");
+    if (!groups[key]) {
+      const ab = [r.from_unit, r.to_unit]
+        .sort((x, y) => unitRank(x) < unitRank(y) ? -1 : 1);
+      groups[key] = {a: ab[0], b: ab[1], rates: {}, latestAt: r.created_at};
+      order.push(key);
+    }
+    const g = groups[key];
+    g.rates[r.from_unit + ">" + r.to_unit + ":" + r.side] = r;
+    if (r.created_at > g.latestAt) g.latestAt = r.created_at;
+  });
+  const cell = (g, from, to, side) => {
+    const r = g.rates[from + ">" + to + ":" + side];
+    if (!r) return <td style={{color: "#555"}}>-</td>;
+    return (
+      <td>
+        {fmtNum(r.amount_from)} : {fmtNum(r.amount_to)}
+        <div className="value-sub">
+          1 {unitLabel(from)} ≈ {fmtNum(r.amount_to / r.amount_from, 3)} {unitLabel(to)}
+        </div>
+      </td>
+    );
+  };
+  const buyTh = {color: "#c8aa6e"};
   return (
     <table className="eco" style={{marginTop: 10}}>
       <thead>
-        <tr><th>通货</th><th>1 通货 ＝ 金币</th><th>1 金币 ＝ 通货</th><th>1 金币 ≈ 混沌（最优路径）</th></tr>
+        <tr>
+          <th>通货对（A ⇄ B）</th>
+          <th style={buyTh}>A → B（买）</th>
+          <th>A → B（卖）</th>
+          <th style={buyTh}>B → A（买）</th>
+          <th>B → A（卖）</th>
+        </tr>
       </thead>
       <tbody>
-        {rows.map(r => (
-          <tr key={r.unit}>
-            <td><UnitIcon unit={r.unit} icons={state.unit_icons}/> {unitLabel(r.unit)}</td>
-            <td>{r.gold_per_unit ? fmtNum(r.gold_per_unit, 0) + " 金币" : "-"}</td>
-            <td>{r.unit_per_gold ? fmtNum(r.unit_per_gold, 6) + " " + unitLabel(r.unit) : "-"}</td>
-            <td>{r.chaos_per_gold ? fmtNum(r.chaos_per_gold, 6) + " 混沌石" : "-"}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-// 最新比例表（本类别当前生效的汇率，由游玩工具同步）
-function RatesTable({ state }) {
-  const rows = state.latest;
-  return (
-    <table className="eco" style={{marginTop: 10}}>
-      <thead><tr><th>类型</th><th>方向</th><th>市场比例</th><th>折合 1 单位</th><th>同步时间</th></tr></thead>
-      <tbody>
-        {rows.length === 0 &&
+        {order.length === 0 &&
           <tr><td colSpan="5" style={{color: "#777"}}>暂无数据，请在游玩工具「交易」页执行对应抓取</td></tr>}
-        {rows.map(r => (
-          <tr key={r.id}>
-            <td style={{color: r.side === "buy" ? "#c8aa6e" : "#999"}}>
-              {r.side === "buy" ? "买" : "卖"}
-            </td>
-            <td>
-              <UnitIcon unit={r.from_unit} icons={state.unit_icons}/> {unitDualLabel(r.from_unit, state.unit_labels)}
-              <span className="swap">→</span>
-              <UnitIcon unit={r.to_unit} icons={state.unit_icons}/> {unitDualLabel(r.to_unit, state.unit_labels)}
-            </td>
-            <td>{fmtNum(r.amount_from)} : {fmtNum(r.amount_to)}</td>
-            <td>1 {unitLabel(r.from_unit)} ≈ {fmtNum(r.amount_to / r.amount_from, 3)} {unitLabel(r.to_unit)}</td>
-            <td style={{color: "#888"}}>{r.created_at}</td>
-          </tr>
-        ))}
+        {order.map(k => {
+          const g = groups[k];
+          return (
+            <tr key={k}>
+              <td>
+                <UnitIcon unit={g.a} icons={state.unit_icons}/> {unitDualLabel(g.a, state.unit_labels)}
+                <span className="swap">⇄</span>
+                <UnitIcon unit={g.b} icons={state.unit_icons}/> {unitDualLabel(g.b, state.unit_labels)}
+                <div className="value-sub">最近同步：{g.latestAt}</div>
+              </td>
+              {cell(g, g.a, g.b, "buy")}
+              {cell(g, g.a, g.b, "sell")}
+              {cell(g, g.b, g.a, "buy")}
+              {cell(g, g.b, g.a, "sell")}
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );
 }
 
-// 市场比例面板：VE 值设置 + 金币转化 + 最新比例（只读展示，数据来自游玩工具同步）
-function MarketRatePanel({ state, reload }) {
+// 市场比例面板：本类别当前生效的汇率（只读展示，数据来自游玩工具同步；
+// 通货↔金币的 Currency Exchange 值为固定值，信息库已有，不在此展示）
+function MarketRatePanel({ state }) {
   return (
     <div className="panel">
       <div className="panel-title" style={{cursor: "default"}}>
         市场比例（游玩工具抓取同步，同方向只保留最近一次）
       </div>
-      <GoldValueForm state={state} reload={reload}/>
-      <GoldConvTable state={state}/>
       <RatesTable state={state}/>
     </div>
   );
 }
 
-// 最佳套利方案（持仓优化版）：填入当前神圣/混沌/崇高/金币持仓，按金币效率
-// （每万金币净得神圣当量）选最优环；每环本金受持仓与金币预算双重约束，
-// 消耗金币永不超预算，给出执行步骤与最终获取数量（单位双名显示）
-function ArbitragePanel({ state, reload }) {
-  const [form, setForm] = useState(null);
-  const [msg, setMsg] = useState("");
-  useEffect(() => {
-    const h = state.holdings || {};
-    setForm({
-      divine: h.divine ? String(h.divine) : "",
-      chaos: h.chaos ? String(h.chaos) : "",
-      exalted: h.exalted ? String(h.exalted) : "",
-      gold: h.gold ? String(h.gold) : "",
-    });
-  }, [state.holdings]);
-  if (!form) return null;
+// 最佳套利方案（每轮口径）：套利核心是金币换通货，不关注当前持仓——
+// 以 1 单位起点通货为单独一轮，收益 = 通货互换价差（环终值 - 1），
+// 效率 = 价差折神圣 / 每轮金币费（每 1 万金币净得多少神圣当量，即通货/万金币转换率）
+function ArbitragePanel({ state }) {
   const ul = u => unitDualLabel(u, state.unit_labels);
   const plan = state.arb_plan;
-  const save = () => {
-    const body = {};
-    ["divine", "chaos", "exalted", "gold"].forEach(k => { body[k] = Number(form[k]) || null; });
-    api("/api/trade/holdings", {method: "PUT", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify(body)})
-      .then(() => { setMsg("已保存"); reload(); setTimeout(() => setMsg(""), 1500); })
-      .catch(e => setMsg("保存失败：" + e.message));
-  };
-  const opps = (state.opportunities || []).slice(0, 3);
-  const holdings = [
-    {key: "divine", label: "神圣石 Divine Orb"},
-    {key: "chaos", label: "混沌石 Chaos Orb"},
-    {key: "exalted", label: "崇高石 Exalted Orb"},
-    {key: "gold", label: "金币 Gold"},
-  ];
+  const opps = (state.opportunities || []).slice(0, 5);
   return (
     <div className="panel">
       <div className="panel-title" style={{cursor: "default"}}>
-        最佳套利方案（消耗金币沿价差兑换，以神圣石为基准）
-      </div>
-      <div className="row" style={{marginTop: 8}}>
-        <span style={{color: "#999"}}>当前持仓：</span>
-        {holdings.map(h => (
-          <span key={h.key}>{h.label}
-            <input type="number" style={{width: 90, margin: "0 4px"}} min="0" step="any"
-              value={form[h.key]}
-              onChange={e => setForm({...form, [h.key]: e.target.value})}/>
-          </span>
-        ))}
-        <button onClick={save}>保存</button>
-        <span className="status-line">{msg}</span>
+        最佳套利方案（每轮口径：1 单位起点通货，金币费实付）
       </div>
       {!plan &&
         <div style={{color: "#777", marginTop: 8}}>
-          暂无可执行方案：需存在盈利兑换环，且神圣/混沌/崇高石任一持仓大于 0、金币预算大于 0
+          暂无可套利兑换环：需同步比例后存在价差为正、且金币费（Currency Exchange 值）已知的环
         </div>}
       {plan &&
         <div style={{marginTop: 8}}>
           <div className="row" style={{marginTop: 0}}>
-            <span>每环投入 <b>{fmtNum(plan.batch, 2)}</b> {ul(plan.start_unit)}
-              {plan.batch < plan.principal &&
-                <span style={{color: "#777", fontSize: 11}}>（本金 {fmtNum(plan.principal, 2)}，受金币预算缩减）</span>}，</span>
-            <span>每环净得 <b className="pos">{fmtNum(plan.profit_units * plan.batch, 4)}</b> {ul(plan.start_unit)}
-              （折神圣 {fmtNum(plan.profit_units * plan.batch * plan.divine_value, 4)}），</span>
-            <span>每 1 万金币净得 {plan.divine_per_10k_gold !== null && plan.divine_per_10k_gold !== undefined
-              ? fmtNum(plan.divine_per_10k_gold, 4) : "-"} 神圣当量</span>
+            <span>起点 <UnitIcon unit={plan.start_unit} icons={state.unit_icons}/> <b>{ul(plan.start_unit)}</b>，</span>
+            <span>每轮价差 <b className="pos">+{fmtNum((plan.rate - 1) * 100, 2)}%</b>
+              <span style={{color: "#777", fontSize: 11}}>（1 → {fmtNum(plan.final_amount, 4)}）</span>，</span>
+            <span>每轮净得 <b className="pos">{fmtNum(plan.profit_units, 4)}</b> {ul(plan.start_unit)}
+              <span style={{color: "#777", fontSize: 11}}>（折神圣 {fmtNum(plan.profit_divine_per_loop, 4)}）</span></span>
           </div>
           <div className="row" style={{marginTop: 4}}>
-            <span>金币预算 <b>{fmtNum(plan.gold_budget, 0)}</b> 可跑 <b>{fmtNum(plan.loops, 1)}</b> 环，</span>
-            <span>全程消耗金币 <b>{fmtNum(plan.total_gold_fee, 0)}</b>
-              <span style={{color: "#777", fontSize: 11}}>（不超预算）</span>，</span>
-            <span>累计净得 <b className="pos">{fmtNum(plan.profit_total, 2)}</b> {ul(plan.start_unit)} →</span>
-            <b className="pos">最终约 {fmtNum(plan.final_amount, 2)} {ul(plan.start_unit)}
-              （折神圣 {fmtNum(plan.final_divine, 2)}）</b>
+            <span>每轮金币费 <b>{plan.total_gold_fee === null || plan.total_gold_fee === undefined
+              ? "-" : fmtNum(plan.total_gold_fee, 0)}</b>，</span>
+            <span>每 1 万金币净得 <b className="pos">
+              {plan.divine_per_10k_gold === null || plan.divine_per_10k_gold === undefined
+                ? "-" : fmtNum(plan.divine_per_10k_gold, 4)}</b> 神圣当量
+              <span style={{color: "#777", fontSize: 11}}>（通货/万金币转换率）</span></span>
           </div>
           <table className="eco" style={{marginTop: 8}}>
             <thead><tr><th>步骤</th><th>付出</th><th>获得</th><th>市场比例</th><th>金币费</th></tr></thead>
@@ -557,7 +471,7 @@ function ArbitragePanel({ state, reload }) {
             </tbody>
           </table>
           <div style={{marginTop: 6, color: "#999"}}>
-            以上为每环规模（金币费为每环消耗 × 环数 = 全程总消耗）；实际可执行规模受市场挂单深度限制，建议小额多次
+            以上为单独一轮（1 单位起点通货）的步骤与消耗；实际每轮规模受市场挂单深度限制，建议小额多次
           </div>
           {plan.check &&
             <div style={{marginTop: 4, fontSize: 12}}>
@@ -568,129 +482,21 @@ function ArbitragePanel({ state, reload }) {
         </div>}
       {opps.length > 0 &&
         <table className="eco" style={{marginTop: 8}}>
-          <thead><tr><th>备选方案</th><th>起点</th><th>每环收益率</th><th>每 1 万金币净得（神圣当量）</th></tr></thead>
+          <thead><tr><th>备选方案</th><th>起点</th><th>每轮价差</th><th>每轮金币费</th><th>每 1 万金币净得（神圣当量）</th></tr></thead>
           <tbody>
             {opps.map((o, i) => (
               <tr key={i}>
                 <td>{i + 1}</td>
                 <td><UnitIcon unit={o.start_unit} icons={state.unit_icons}/> {ul(o.start_unit)}</td>
                 <td>+{fmtNum((o.rate - 1) * 100, 2)}%</td>
-                <td>{o.divine_per_10k_gold !== null && o.divine_per_10k_gold !== undefined
-                      ? fmtNum(o.divine_per_10k_gold, 4) : "-"}</td>
+                <td>{o.total_gold_fee === null || o.total_gold_fee === undefined
+                      ? "-" : fmtNum(o.total_gold_fee, 0)}</td>
+                <td>{o.divine_per_10k_gold === null || o.divine_per_10k_gold === undefined
+                      ? "-" : fmtNum(o.divine_per_10k_gold, 4)}</td>
               </tr>
             ))}
           </tbody>
         </table>}
-    </div>
-  );
-}
-
-// 金币获取方案：三种默认通货各自「消耗金币兑换通货」的最优路径（全部可用源单位比较）
-function GoldPlansPanel({ state }) {
-  const plans = state.gold_plans || [];
-  const renderOption = (target, opt, isBest) => (
-    <tr key={target + ":" + opt.source} style={isBest ? {} : {color: "#888"}}>
-      <td>{isBest &&
-        <span><UnitIcon unit={target} icons={state.unit_icons}/> {unitLabel(target)}</span>}</td>
-      <td>
-        <UnitIcon unit={opt.source} icons={state.unit_icons}/> {unitLabel(opt.source)}
-        {!isBest && <span style={{fontSize: 11}}>（备选）</span>}
-      </td>
-      <td><PathView path={opt.path} icons={state.unit_icons}/></td>
-      <td>1 {unitLabel(opt.source)} ≈ {fmtNum(opt.final_amount, 4)} {unitLabel(target)}</td>
-      <td>{opt.gold_per_unit !== null && opt.gold_per_unit !== undefined
-        ? <span>{fmtNum(opt.gold_per_unit, 0)} 金币/个
-            <span style={{color: "#777", fontSize: 11}}>
-              （每 1 万金币 ≈ {fmtNum(10000 / opt.gold_per_unit, 4)} {unitLabel(target)}）</span></span>
-        : <span style={{color: "#777"}}>未知（缺 Currency Exchange 值）</span>}</td>
-    </tr>
-  );
-  return (
-    <div className="panel">
-      <div className="panel-title" style={{cursor: "default"}}>
-        金币获取方案（消耗金币兑换三种默认通货的最优路径，金币成本最低者优先）
-      </div>
-      <table className="eco" style={{marginTop: 10}}>
-        <thead><tr><th>目标</th><th>源通货</th><th>路径</th><th>兑换率</th><th>金币成本</th></tr></thead>
-        <tbody>
-          {plans.map(p => (
-            <React.Fragment key={p.target}>
-              {p.best
-                ? renderOption(p.target, p.best, true)
-                : <tr key={p.target}>
-                    <td><UnitIcon unit={p.target} icons={state.unit_icons}/> {unitLabel(p.target)}</td>
-                    <td colSpan="4" style={{color: "#777"}}>暂无可达路径，请先执行抓取同步</td>
-                  </tr>}
-              {(p.alternatives || []).slice(0, 3).map(o => renderOption(p.target, o, false))}
-            </React.Fragment>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// 第三部分：最优兑换方案
-function BestPlanSection({ state }) {
-  const keys = Object.keys(state.best);
-  return (
-    <div className="panel">
-      <div className="panel-title" style={{cursor: "default"}}>最佳兑换方案（买边已折算金币费）</div>
-      {keys.length === 0 && <div style={{color: "#777", marginTop: 8}}>同步比例后自动计算</div>}
-      {keys.length > 0 &&
-        <table className="eco" style={{marginTop: 10}}>
-          <thead><tr><th>兑换</th><th>最优比率</th><th>路径</th></tr></thead>
-          <tbody>
-            {keys.map(k => {
-              const b = state.best[k];
-              const src = k.split(">")[0], dst = k.split(">")[1];
-              const direct = b.path.length === 1;
-              return (
-                <tr key={k}>
-                  <td>
-                    <UnitIcon unit={src} icons={state.unit_icons}/> {unitLabel(src)}
-                    <span className="swap">→</span>
-                    <UnitIcon unit={dst} icons={state.unit_icons}/> {unitLabel(dst)}
-                  </td>
-                  <td>
-                    1 {unitLabel(src)} ≈ <b style={{color: "#c8aa6e"}}>{fmtNum(b.rate, 4)}</b> {unitLabel(dst)}
-                    {!direct && <span style={{color: "#7ee787", fontSize: 11}}>（绕行更划算）</span>}
-                  </td>
-                  <td><PathView path={b.path} icons={state.unit_icons}/></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>}
-    </div>
-  );
-}
-
-// 同步历史（可删除误同步的记录）
-function TradeHistory({ state, reload }) {
-  const del = id => {
-    api("/api/trade/rates/" + id, {method: "DELETE"}).then(reload).catch(() => {});
-  };
-  return (
-    <div className="panel">
-      <div className="panel-title" style={{cursor: "default"}}>同步历史（最近 {state.history.length} 条）</div>
-      <table className="eco" style={{marginTop: 8}}>
-        <thead><tr><th>类型</th><th>方向</th><th>比例</th><th>同步时间</th><th></th></tr></thead>
-        <tbody>
-          {state.history.length === 0 && <tr><td colSpan="5" style={{color: "#777"}}>暂无记录</td></tr>}
-          {state.history.map(r => (
-            <tr key={r.id}>
-              <td style={{color: r.side === "buy" ? "#c8aa6e" : "#999"}}>
-                {r.side === "buy" ? "买" : "卖"}
-              </td>
-              <td>{unitLabel(r.from_unit)} → {unitLabel(r.to_unit)}</td>
-              <td>{fmtNum(r.amount_from)} : {fmtNum(r.amount_to)}</td>
-              <td style={{color: "#888"}}>{r.created_at}</td>
-              <td><button style={{padding: "2px 8px"}} onClick={() => del(r.id)}>删除</button></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }
@@ -707,13 +513,10 @@ function TradePage({ category }) {
     <div className="main">
       <h2>交易 · {meta.label}</h2>
       <div className="meta-line">
-        {meta.source}；页面只读展示，按最新比例自动计算最优兑换路径与最佳套利方案
+        {meta.source}；页面只读展示，按最新比例自动计算每轮口径最佳套利方案
       </div>
-      <ArbitragePanel state={state} reload={load}/>
-      <MarketRatePanel state={state} reload={load}/>
-      <GoldPlansPanel state={state}/>
-      <BestPlanSection state={state}/>
-      <TradeHistory state={state} reload={load}/>
+      <ArbitragePanel state={state}/>
+      <MarketRatePanel state={state}/>
     </div>
   );
 }

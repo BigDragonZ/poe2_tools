@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""交易助手纯逻辑单元测试：最优兑换路径与套利环检测。"""
+"""交易助手纯逻辑单元测试：最优兑换路径、套利环检测与每轮口径套利方案。"""
 
 from web import trading
 
@@ -189,23 +189,6 @@ def test_best_conversion_buy_path_uses_effective_rate():
     assert abs(r - 1 / 350) < 1e-12
 
 
-def test_gold_conversion_basic():
-    rates = [rate("divine", "chaos", 1, 300, "sell")]
-    rows = {r["unit"]: r for r in trading.gold_conversion(rates, GV)}
-    assert rows["chaos"]["gold_per_unit"] == 50
-    assert rows["chaos"]["unit_per_gold"] == 1 / 50
-    assert rows["chaos"]["chaos_per_gold"] == 1 / 50
-    # 1 金币 = 1/2500 神圣 = (1/2500)*300 混沌 = 0.12 混沌
-    assert abs(rows["divine"]["chaos_per_gold"] - 300 / 2500) < 1e-12
-
-
-def test_gold_conversion_missing_ve():
-    rows = {r["unit"]: r for r in trading.gold_conversion([], {"chaos": 50})}
-    assert rows["divine"]["gold_per_unit"] is None
-    assert rows["divine"]["chaos_per_gold"] is None
-    assert rows["chaos"]["chaos_per_gold"] == 1 / 50
-
-
 def test_cycle_with_buy_fee_not_profitable():
     # 无费看似套利：卖 1 神圣得 310 混沌，300 混沌即可买回 1 神圣
     # 但买回需 2500 金币 = 50 混沌等值（实际成本 350）→ 净亏
@@ -273,67 +256,6 @@ def test_cycle_plan_unknown_ve_total_gold_none():
     assert buy_step["gold_fee"] is None
 
 
-def test_best_arbitrage_picks_highest_rate_cycle():
-    rates = [
-        rate("divine", "chaos", 1, 300),
-        rate("chaos", "divine", 100, 1),          # 环1：3 倍
-        rate("exalted", "chaos", 1, 20),
-        rate("chaos", "exalted", 10, 1),          # 环2：2 倍
-    ]
-    plan = trading.best_arbitrage(rates)
-    assert plan["profitable"] is True
-    assert abs(plan["rate"] - 3.0) < 1e-9
-    assert {s["from_unit"] for s in plan["steps"]} == {"divine", "chaos"}
-    assert abs(plan["final_amount"] - 3.0) < 1e-9
-    assert abs(plan["profit_units"] - 2.0) < 1e-9
-
-
-def test_best_arbitrage_gold_fee_not_deducted_from_profit():
-    # 环1：差价 +3%，买边金币费高；环2：差价 +2%，无金币费
-    # 目标是消耗金币换通货：按通货差价排序，环1 胜出，金币费不影响盈利判断
-    rates = [
-        rate("divine", "chaos", 1, 309, "sell"),
-        rate("chaos", "divine", 300, 1, "buy"),
-        rate("exalted", "chaos", 1, 20.4, "sell"),
-        rate("chaos", "exalted", 20, 1, "sell"),
-    ]
-    plan = trading.best_arbitrage(rates, GV)
-    assert plan["profitable"] is True
-    assert {s["from_unit"] for s in plan["steps"]} == {"divine", "chaos"}
-    assert abs(plan["profit_units"] - 0.03) < 1e-9
-
-
-def test_best_arbitrage_picks_best_rotation():
-    # 同一环差价收益相同，取金币费最低的起点旋转：
-    # 从混沌起步（神圣腿交易量小、费 2500/300 ≈ 8.3）优于从神圣起步（费 ≈ 2575）
-    rates = [
-        rate("divine", "chaos", 1, 309, "sell"),
-        rate("chaos", "divine", 300, 1, "buy"),
-    ]
-    plan = trading.best_arbitrage(rates, GV)
-    assert plan["start_unit"] == "chaos"
-    assert abs(plan["total_gold_fee"] - 2500 / 300) < 1e-6
-    assert abs(plan["profit_units"] - 0.03) < 1e-9
-    assert plan["profitable"] is True
-
-
-def test_best_arbitrage_unprofitable_reference():
-    # 无盈利环时仍返回最接近的环（profitable=False）
-    rates = [
-        rate("divine", "chaos", 1, 300, "sell"),
-        rate("chaos", "divine", 310, 1, "buy"),
-    ]
-    plan = trading.best_arbitrage(rates)
-    assert plan is not None and plan["profitable"] is False
-    assert plan["rate"] < 1.0
-
-
-def test_best_arbitrage_no_cycle_returns_none():
-    rates = [rate("divine", "chaos", 1, 300)]
-    assert trading.best_arbitrage(rates) is None
-    assert trading.best_arbitrage([]) is None
-
-
 # ---------- 自动套利：候选筛选 ----------
 
 def _snap(slug, name_en, price_divine, price_chaos, name_zh="某通货", wiki_slug=None):
@@ -385,64 +307,6 @@ def test_filter_currency_candidates_custom_range():
     assert [c["slug"] for c in got] == ["b"]
 
 
-# ---------- 自动套利：金币获取方案 ----------
-
-def test_best_gold_plans_best_and_alternatives():
-    rates = [
-        rate("divine", "chaos", 1, 310, "buy"),   # 直换：50 金币/混沌（= VE(chaos)）
-        rate("exalted", "chaos", 1, 19, "sell"),  # 卖出免金币：0 金币/混沌
-        rate("divine", "exalted", 1, 15, "buy"),
-        rate("chaos", "divine", 300, 1, "buy"),
-    ]
-    plans = {p["target"]: p for p in trading.best_gold_plans(rates, GV)}
-    chaos = plans["chaos"]
-    assert chaos["best"]["source"] == "exalted"  # 免金币路径胜出
-    assert chaos["best"]["gold_per_unit"] == 0
-    assert chaos["best"]["final_amount"] == 19
-    assert any(a["source"] == "divine" for a in chaos["alternatives"])
-    divine = plans["divine"]
-    assert divine["best"]["source"] == "chaos"
-    # 1 混沌 → 1/300 神圣，金币费 (1/300)×2500；折合每 1 神圣 = 2500 金币（= VE(divine)）
-    assert abs(divine["best"]["gold_per_unit"] - 2500) < 1e-6
-
-
-def test_best_gold_plans_item_source_and_two_edge_fee():
-    # 绕行 崇高→物品→混沌 的金币费含两段（物品段 VE(item) + 混沌段 VE(chaos)），贵于直换
-    rates = [
-        rate("divine", "chaos", 1, 310, "buy"),
-        rate("exalted", "item:机会石", 1, 2, "buy"),
-        rate("item:机会石", "chaos", 1, 170, "buy"),
-    ]
-    gv = dict(GV)
-    gv["item:机会石"] = 100
-    plans = {p["target"]: p for p in trading.best_gold_plans(rates, gv)}
-    chaos = plans["chaos"]
-    assert chaos["best"]["source"] == "divine"
-    assert len(chaos["best"]["path"]) == 1
-    assert abs(chaos["best"]["gold_per_unit"] - 50) < 1e-9
-    via_item = [a for a in chaos["alternatives"] if len(a["path"]) == 2][0]
-    assert via_item["source"] == "exalted"
-    # 1 崇高 → 2 机会石（费 2×100）→ 340 混沌（费 340×50），共 17200 / 340 ≈ 50.59
-    assert abs(via_item["gold_per_unit"] - (200 + 17000) / 340) < 1e-9
-    assert via_item["gold_fee"] == 200 + 17000
-
-
-def test_best_gold_plans_unknown_target_ve_gives_none():
-    # 目标通货 VE 缺失：买边金币费未知 → gold_per_unit 为 None，仍给出路径
-    rates = [rate("divine", "chaos", 1, 310, "buy")]
-    plans = {p["target"]: p for p in trading.best_gold_plans(rates, {"divine": 2500})}
-    chaos = plans["chaos"]
-    assert chaos["best"] is not None
-    assert chaos["best"]["gold_fee"] is None
-    assert chaos["best"]["gold_per_unit"] is None
-
-
-def test_best_gold_plans_no_path():
-    plans = {p["target"]: p for p in trading.best_gold_plans([], GV)}
-    for p in plans.values():
-        assert p["best"] is None and p["alternatives"] == []
-
-
 # ---------- 自动套利：方案复核（double check） ----------
 
 def test_verify_arbitrage_plan_ok():
@@ -450,7 +314,7 @@ def test_verify_arbitrage_plan_ok():
         rate("divine", "chaos", 1, 310, "sell"),
         rate("chaos", "divine", 300, 1, "buy"),
     ]
-    plan = trading.best_arbitrage(rates, GV)
+    plan = trading.best_arbitrage_round(rates, GV)
     check = trading.verify_arbitrage_plan(rates, GV, plan)
     assert check["ok"] is True
     assert check["discrepancies"] == []
@@ -463,7 +327,7 @@ def test_verify_arbitrage_plan_detects_tampered_final():
         rate("divine", "chaos", 1, 310, "sell"),
         rate("chaos", "divine", 300, 1, "buy"),
     ]
-    plan = trading.best_arbitrage(rates, GV)
+    plan = trading.best_arbitrage_round(rates, GV)
     tampered = dict(plan)
     tampered["final_amount"] = plan["final_amount"] * 1.01
     check = trading.verify_arbitrage_plan(rates, GV, tampered)
@@ -476,7 +340,7 @@ def test_verify_arbitrage_plan_detects_missing_edge():
         rate("divine", "chaos", 1, 310, "sell"),
         rate("chaos", "divine", 300, 1, "buy"),
     ]
-    plan = trading.best_arbitrage(rates, GV)
+    plan = trading.best_arbitrage_round(rates, GV)
     first = plan["path"][0]
     reduced = [r for r in rates
                if not (r["from_unit"] == first["from_unit"]
@@ -492,7 +356,7 @@ def test_verify_arbitrage_plan_without_path():
     assert any("路径" in d for d in check["discrepancies"])
 
 
-# ---------- 套利方案持仓优化（神圣口径） ----------
+# ---------- 每轮口径最优套利方案 ----------
 
 # 环 A：神圣 -(卖 1:309)-> 混沌 -(买 300:1)-> 神圣（1.03 倍）
 # 环 B：神圣 -(买 1:2)-> 机会石 -(买 1:170)-> 混沌 -(买 300:1)-> 神圣（340/300 ≈ 1.133 倍）
@@ -534,98 +398,41 @@ def test_arbitrage_opportunities_skips_unknown_ve():
     assert {o["start_unit"] for o in opps} == {"divine", "chaos"}
 
 
-def test_best_arbitrage_plan_math():
-    """持仓 神圣167/混沌207/金币750万：最优为环 A 混沌起点（手算对照）。
+def test_best_arbitrage_round_picks_best_gold_efficiency():
+    """取金币效率最高的环+旋转（环 A 混沌起点，0.12 神圣/万金币），步骤为单独一轮。
 
-    每环（1 混沌口径）：费 2500/300 金币，净得 0.03 混沌；
-    batch=min(207, 7500000/(2500/300)) = 207 → 每环费 1725 金币，
-    loops=7500000/1725；profit_total = 0.03×7500000/(2500/300) = 27000 混沌；
-    total_gold_fee = 1725×loops = 7500000（不超预算）；
-    final = 207+27000 = 27207 混沌，折神圣 27207/300 = 90.69。
+    手算对照：1 混沌 -(买 300:1)-> 1/300 神圣（费 (1/300)×2500 金币）
+    -(卖 1:309)-> 309/300 混沌；价差 +3%，净得 0.03 混沌（折神圣 0.03/300），
+    每 1 万金币净得 (0.03/300) / (2500/300) × 10000 = 0.12 神圣当量。
     """
-    holdings = {"divine": 167, "chaos": 207, "gold": 7500000}
-    plan = trading.best_arbitrage_plan(ARB_RATES, ARB_GV, holdings)
+    plan = trading.best_arbitrage_round(ARB_RATES, ARB_GV)
     assert plan["start_unit"] == "chaos"
-    assert plan["principal"] == 207
-    assert plan["batch"] == 207
-    assert plan["gold_budget"] == 7500000
-    assert abs(plan["loops"] - 7500000 / ((2500 / 300) * 207)) < 1e-9
-    assert abs(plan["profit_total"] - 27000) < 1e-6
-    assert abs(plan["total_gold_fee"] - 7500000) < 1e-3  # 消耗金币不超预算
-    assert plan["total_gold_fee"] <= plan["gold_budget"]
-    assert abs(plan["final_amount"] - 27207) < 1e-6
-    assert abs(plan["final_divine"] - 27207 / 300) < 1e-9
-    # 执行步骤按 batch 缩放（207 混沌 → 0.69 神圣 → 213.21 混沌）
+    assert abs(plan["rate"] - 1.03) < 1e-9
+    assert abs(plan["profit_units"] - 0.03) < 1e-9
+    assert abs(plan["total_gold_fee"] - 2500 / 300) < 1e-9
+    assert abs(plan["divine_value"] - 1 / 300) < 1e-9
+    assert abs(plan["profit_divine_per_loop"] - 0.03 / 300) < 1e-12
+    assert abs(plan["divine_per_10k_gold"] - 0.12) < 1e-9
+    # 步骤以 1 单位起点通货为一轮，不按持仓缩放
     s1, s2 = plan["steps"]
-    assert s1["from_unit"] == "chaos" and s1["side"] == "buy"
-    assert abs(s1["pay"] - 207) < 1e-9
-    assert abs(s1["receive"] - 207 / 300) < 1e-9
-    assert abs(s1["gold_fee"] - (207 / 300) * 2500) < 1e-6
+    assert s1["from_unit"] == "chaos" and s1["side"] == "buy" and s1["pay"] == 1
+    assert abs(s1["receive"] - 1 / 300) < 1e-9
+    assert abs(s1["gold_fee"] - (1 / 300) * 2500) < 1e-9
     assert s2["from_unit"] == "divine" and s2["side"] == "sell"
-    assert s2["gold_fee"] is None
-    assert abs(s2["receive"] - (207 / 300) * 309) < 1e-6
-    # double check：1 本金口径独立复核一致
+    assert abs(s2["receive"] - 309 / 300) < 1e-9
+    # 独立复核一致
     assert plan["check"]["ok"] is True
 
 
-def test_best_arbitrage_plan_skips_zero_holding():
-    """混沌持仓为 0：混沌起点的条目跳过，最优退为环 A 神圣起点。"""
-    holdings = {"divine": 167, "chaos": 0, "gold": 7500000}
-    plan = trading.best_arbitrage_plan(ARB_RATES, ARB_GV, holdings)
-    assert plan["start_unit"] == "divine"
-    assert plan["batch"] == 167
-    # profit_total = 0.03 × 7500000 / 2575（batch 抵消）
-    assert abs(plan["profit_total"] - 0.03 * 7500000 / 2575) < 1e-6
-    assert abs(plan["final_amount"] - (167 + plan["profit_total"])) < 1e-9
-    assert abs(plan["final_divine"] - plan["final_amount"]) < 1e-9  # 神圣起点折神圣系数 1
-
-
-def test_best_arbitrage_plan_batch_capped_by_gold_budget():
-    """金币预算跑不满整仓一环：每环本金按预算缩减，消耗金币不超预算。
-
-    环 A 混沌起点：fee_per_unit = 2500/300 ≈ 8.33；持仓 207 混沌整仓一环需
-    1725 金币，预算只有 1000 → batch = 1000/(2500/300) = 120 混沌，loops = 1，
-    total_gold_fee = 1000 = 预算，profit_total = 0.03 × 120 = 3.6 混沌。
-    """
-    holdings = {"divine": 167, "chaos": 207, "gold": 1000}
-    plan = trading.best_arbitrage_plan(ARB_RATES, ARB_GV, holdings)
-    assert plan["start_unit"] == "chaos"
-    assert plan["principal"] == 207
-    assert abs(plan["batch"] - 120) < 1e-9
-    assert abs(plan["loops"] - 1.0) < 1e-9
-    assert abs(plan["total_gold_fee"] - 1000) < 1e-6
-    assert plan["total_gold_fee"] <= plan["gold_budget"]
-    assert abs(plan["profit_total"] - 3.6) < 1e-6
-    assert abs(plan["final_amount"] - 210.6) < 1e-6
-    # 步骤按缩减后的每环本金缩放
-    assert abs(plan["steps"][0]["pay"] - 120) < 1e-9
-
-
-def test_best_arbitrage_plan_accepts_exalted_principal():
-    """崇高石同样可作为套利本金（PRINCIPAL_UNITS）。"""
-    rates = [
-        rate("exalted", "chaos", 60, 1, "buy"),   # 买 1 混沌费 1×50 金币
-        rate("chaos", "exalted", 1, 62, "sell"),  # 环收益 62/60
-        rate("chaos", "divine", 300, 1, "buy"),   # 崇高折神圣的路径
-        rate("divine", "chaos", 1, 300, "buy"),
-    ]
-    gv = {"chaos": 50, "exalted": 1000, "divine": 2500}
-    holdings = {"divine": 0, "chaos": 0, "exalted": 600, "gold": 100000}
-    plan = trading.best_arbitrage_plan(rates, gv, holdings)
-    assert plan["start_unit"] == "exalted"
-    assert plan["batch"] == 600
-    assert plan["total_gold_fee"] <= holdings["gold"]
-    assert plan["profit_total"] > 0
-
-
-def test_best_arbitrage_plan_none():
-    # 两种本金持仓都为 0
-    assert trading.best_arbitrage_plan(
-        ARB_RATES, ARB_GV, {"divine": 0, "chaos": 0, "gold": 7500000}) is None
-    # 金币预算为 0：无法支付买边金币费，无可执行方案
-    assert trading.best_arbitrage_plan(
-        ARB_RATES, ARB_GV, {"divine": 167, "chaos": 207, "gold": 0}) is None
+def test_best_arbitrage_round_none():
     # 无盈利环（互为倒数的平衡比例）
     balanced = [rate("divine", "chaos", 1, 300), rate("chaos", "divine", 300, 1)]
-    assert trading.best_arbitrage_plan(
-        balanced, ARB_GV, {"divine": 167, "chaos": 207, "gold": 7500000}) is None
+    assert trading.best_arbitrage_round(balanced, ARB_GV) is None
+    # 无汇率
+    assert trading.best_arbitrage_round([], ARB_GV) is None
+    # 有盈利环但买边 VE 缺失（金币费未知）→ 机会整体跳过
+    rates = [
+        rate("divine", "chaos", 1, 310, "sell"),
+        rate("chaos", "divine", 300, 1, "buy"),
+    ]
+    assert trading.best_arbitrage_round(rates, {"chaos": 50}) is None
