@@ -462,7 +462,7 @@ function ArbitragePanel({ state }) {
   return (
     <div className="panel">
       <div className="panel-title" style={{cursor: "default"}}>
-        最佳套利方案（买卖差价套换，买边已折算金币费）
+        最佳套利方案（消耗金币套取买卖差价）
       </div>
       {!arb && <div style={{color: "#777", marginTop: 8}}>同步至少一对双向比例后自动计算</div>}
       {arb &&
@@ -474,12 +474,8 @@ function ArbitragePanel({ state }) {
             <span><UnitIcon unit={arb.start_unit} icons={state.unit_icons}/> {unitLabel(arb.start_unit)}
               起投，沿环兑换一圈回到 {unitLabel(arb.start_unit)}</span>
             {arb.profitable
-              ? (arb.net_gold !== null && arb.net_gold !== undefined
-                  ? <b className="pos">可套利：每循环净收益 +{fmtNum(arb.net_gold * scale, 0)} 金币</b>
-                  : <b className="pos">差价收益 +{fmtNum((arb.rate - 1) * 100, 2)}%（金币费未知）</b>)
-              : (arb.net_gold !== null && arb.net_gold !== undefined
-                  ? <b className="neg">净收益 {fmtNum(arb.net_gold * scale, 0)} 金币（差价不足以覆盖金币费，暂不套利）</b>
-                  : <b className="neg">差价收益 {fmtNum((arb.rate - 1) * 100, 2)}%（差价为负，暂不套利）</b>)}
+              ? <b className="pos">可套利：每循环净得 +{fmtNum((arb.rate - 1) * 100, 2)}% {unitLabel(arb.start_unit)}（金币费为正常消耗）</b>
+              : <b className="neg">差价收益 {fmtNum((arb.rate - 1) * 100, 2)}%（无正收益环，暂不套利）</b>}
           </div>
           <table className="eco" style={{marginTop: 8}}>
             <thead><tr><th>步骤</th><th>操作</th><th>付出</th><th>获得</th><th>金币费</th></tr></thead>
@@ -504,13 +500,13 @@ function ArbitragePanel({ state }) {
           </table>
           <div style={{marginTop: 6, color: "#999"}}>
             合计：投入 {fmtNum(scale, 4)} {unitLabel(arb.start_unit)} → 收回 {fmtNum(arb.final_amount * scale, 4)} {unitLabel(arb.start_unit)}
-            （差价收益 {arb.final_amount >= 1 ? "+" : ""}{fmtNum((arb.rate - 1) * 100, 2)}%）
+            （<b className={arb.profit_units >= 0 ? "pos" : "neg"}>
+              净{arb.profit_units >= 0 ? "得" : "亏"} {fmtNum(Math.abs(arb.profit_units * scale), 4)} {unitLabel(arb.start_unit)}</b>）
             {arb.total_gold_fee !== null && arb.total_gold_fee !== undefined
-              ? "，金币费合计 " + fmtNum(arb.total_gold_fee * scale, 0) + " 金币"
+              ? "，消耗金币 " + fmtNum(arb.total_gold_fee * scale, 0)
               : "，金币费未知（缺少 Currency Exchange 值）"}
-            {arb.net_gold !== null && arb.net_gold !== undefined &&
-              <span>，折算净收益 <b className={arb.net_gold >= 0 ? "pos" : "neg"}>
-                {arb.net_gold >= 0 ? "+" : ""}{fmtNum(arb.net_gold * scale, 0)} 金币</b></span>}
+            {arb.units_per_10k_gold !== null && arb.units_per_10k_gold !== undefined &&
+              <span>，金币效率：每 1 万金币净得 {fmtNum(arb.units_per_10k_gold, 4)} {unitLabel(arb.start_unit)}</span>}
             ；实际可执行规模受市场挂单深度限制，建议小额多次
           </div>
         </div>}

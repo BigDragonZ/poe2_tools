@@ -92,7 +92,7 @@ D:/game/poe2_tools/
 │   ├── db.py               # SQLite schema 与读写（写操作全局锁串行化）
 │   ├── icons.py            # 图标下载缓存到本地
 │   ├── service.py          # 刷新任务编排与进度（手动单模块/全量）
-│   ├── trading.py          # 交易页纯逻辑：汇率图、最优兑换路径、套利环检测、最优套利方案展开（执行净收益率口径）
+│   ├── trading.py          # 交易页纯逻辑：汇率图、最优兑换路径、套利环检测、最优套利方案展开（消耗金币换通货差价口径）
 │   ├── scheduler.py        # APScheduler 定时抓取（开服前 2 周每天抓，之后每周抓，可配置）
 │   ├── static/             # index.html（React 18 CDN 单页）+ icons/（图标缓存，不入库）
 │   └── data/               # economy.db（不入库）

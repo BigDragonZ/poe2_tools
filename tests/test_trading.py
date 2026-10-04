@@ -247,10 +247,11 @@ def test_cycle_plan_two_edge_buy_fees():
     assert abs(s2["gold_fee"] - (310 / 300) * 2500) < 1e-6
     assert abs(plan["total_gold_fee"] - (310 / 300) * 2500) < 1e-6
     assert abs(plan["final_amount"] - 310 / 300) < 1e-9
-    # 净收益（折算金币）= 差价收益 (1/30)×2500 - 金币费 (31/30)×2500 = -2500
-    assert abs(plan["net_gold"] - (-2500)) < 1e-6
-    assert abs(plan["roi"] - (-1.0)) < 1e-9
-    assert plan["profitable"] is False
+    # 金币费是消耗不是亏损：收益只看通货差价 +1/30
+    assert abs(plan["profit_units"] - 1 / 30) < 1e-9
+    assert plan["profitable"] is True
+    # 金币效率：(1/30) / ((31/30)×2500) × 10000
+    assert abs(plan["units_per_10k_gold"] - (1 / 30) / ((310 / 300) * 2500) * 10000) < 1e-9
 
 
 def test_cycle_plan_unknown_ve_total_gold_none():
@@ -261,7 +262,7 @@ def test_cycle_plan_unknown_ve_total_gold_none():
     cycle = trading.find_profitable_cycles(rates)[0]
     plan = trading.cycle_plan(cycle, {"chaos": 50})  # 缺 divine 的 VE
     assert plan["total_gold_fee"] is None
-    assert plan["net_gold"] is None
+    assert plan["units_per_10k_gold"] is None
     buy_step = [s for s in plan["steps"] if s["side"] == "buy"][0]
     assert buy_step["gold_fee"] is None
 
@@ -278,11 +279,12 @@ def test_best_arbitrage_picks_highest_rate_cycle():
     assert abs(plan["rate"] - 3.0) < 1e-9
     assert {s["from_unit"] for s in plan["steps"]} == {"divine", "chaos"}
     assert abs(plan["final_amount"] - 3.0) < 1e-9
+    assert abs(plan["profit_units"] - 2.0) < 1e-9
 
 
-def test_best_arbitrage_prefers_net_gold_over_raw_spread():
-    # 环1：差价 +3% 但买边金币费 (309/300)×2500 ≈ 2575 金币 → 净亏
-    # 环2：差价 +2% 无金币费（全卖边）→ 净赚 0.02×1000 = 20 金币
+def test_best_arbitrage_gold_fee_not_deducted_from_profit():
+    # 环1：差价 +3%，买边金币费高；环2：差价 +2%，无金币费
+    # 目标是消耗金币换通货：按通货差价排序，环1 胜出，金币费不影响盈利判断
     rates = [
         rate("divine", "chaos", 1, 309, "sell"),
         rate("chaos", "divine", 300, 1, "buy"),
@@ -291,22 +293,22 @@ def test_best_arbitrage_prefers_net_gold_over_raw_spread():
     ]
     plan = trading.best_arbitrage(rates, GV)
     assert plan["profitable"] is True
-    assert plan["start_unit"] in ("exalted", "chaos")
-    assert abs(plan["roi"] - 0.02) < 1e-9
-    assert abs(plan["net_gold"] - 0.02 * GV[plan["start_unit"]]) < 1e-9
+    assert {s["from_unit"] for s in plan["steps"]} == {"divine", "chaos"}
+    assert abs(plan["profit_units"] - 0.03) < 1e-9
 
 
 def test_best_arbitrage_picks_best_rotation():
-    # 同一环从混沌起步（神圣腿交易量小、金币费低）优于从神圣起步
+    # 同一环差价收益相同，取金币费最低的起点旋转：
+    # 从混沌起步（神圣腿交易量小、费 2500/300 ≈ 8.3）优于从神圣起步（费 ≈ 2575）
     rates = [
         rate("divine", "chaos", 1, 309, "sell"),
         rate("chaos", "divine", 300, 1, "buy"),
     ]
     plan = trading.best_arbitrage(rates, GV)
     assert plan["start_unit"] == "chaos"
-    # roi = 0.03 - (1/300×2500)/50
-    assert abs(plan["roi"] - (0.03 - 2500 / 300 / 50)) < 1e-9
-    assert plan["profitable"] is False
+    assert abs(plan["total_gold_fee"] - 2500 / 300) < 1e-6
+    assert abs(plan["profit_units"] - 0.03) < 1e-9
+    assert plan["profitable"] is True
 
 
 def test_best_arbitrage_unprofitable_reference():
