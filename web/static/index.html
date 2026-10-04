@@ -454,7 +454,71 @@ function MarketRatePanel({ state, reload }) {
   );
 }
 
-// 第三部分：最优兑换方案 + 套利机会
+// 最佳套利方案：基于买卖差价的最优套换环（买边已折算金币费），可输入起投数量换算总量
+function ArbitragePanel({ state }) {
+  const [invest, setInvest] = useState("1");
+  const arb = state.arbitrage;
+  const scale = Number(invest) > 0 ? Number(invest) : 1;
+  return (
+    <div className="panel">
+      <div className="panel-title" style={{cursor: "default"}}>
+        最佳套利方案（买卖差价套换，买边已折算金币费）
+      </div>
+      {!arb && <div style={{color: "#777", marginTop: 8}}>同步至少一对双向比例后自动计算</div>}
+      {arb &&
+        <div style={{marginTop: 8}}>
+          <div className="row" style={{marginTop: 0}}>
+            <span>投入</span>
+            <input type="number" min="0" step="any" style={{width: 90}} value={invest}
+                   onChange={e => setInvest(e.target.value)}/>
+            <span><UnitIcon unit={arb.start_unit} icons={state.unit_icons}/> {unitLabel(arb.start_unit)}
+              起投，沿环兑换一圈回到 {unitLabel(arb.start_unit)}</span>
+            {arb.profitable
+              ? (arb.net_gold !== null && arb.net_gold !== undefined
+                  ? <b className="pos">可套利：每循环净收益 +{fmtNum(arb.net_gold * scale, 0)} 金币</b>
+                  : <b className="pos">差价收益 +{fmtNum((arb.rate - 1) * 100, 2)}%（金币费未知）</b>)
+              : (arb.net_gold !== null && arb.net_gold !== undefined
+                  ? <b className="neg">净收益 {fmtNum(arb.net_gold * scale, 0)} 金币（差价不足以覆盖金币费，暂不套利）</b>
+                  : <b className="neg">差价收益 {fmtNum((arb.rate - 1) * 100, 2)}%（差价为负，暂不套利）</b>)}
+          </div>
+          <table className="eco" style={{marginTop: 8}}>
+            <thead><tr><th>步骤</th><th>操作</th><th>付出</th><th>获得</th><th>金币费</th></tr></thead>
+            <tbody>
+              {arb.steps.map((s, i) => (
+                <tr key={i}>
+                  <td>{i + 1}</td>
+                  <td style={{color: s.side === "buy" ? "#c8aa6e" : "#999"}}>
+                    {s.side === "buy" ? "市场买入" : "卖出"}</td>
+                  <td>
+                    <UnitIcon unit={s.from_unit} icons={state.unit_icons}/> {fmtNum(s.pay * scale, 4)} {unitLabel(s.from_unit)}
+                  </td>
+                  <td>
+                    <UnitIcon unit={s.to_unit} icons={state.unit_icons}/> {fmtNum(s.receive * scale, 4)} {unitLabel(s.to_unit)}
+                    <span style={{color: "#777", fontSize: 11}}>（1:{fmtNum(s.rate, 3)}）</span>
+                  </td>
+                  <td>{s.gold_fee === null || s.gold_fee === undefined
+                        ? "-" : fmtNum(s.gold_fee * scale, 0) + " 金币"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{marginTop: 6, color: "#999"}}>
+            合计：投入 {fmtNum(scale, 4)} {unitLabel(arb.start_unit)} → 收回 {fmtNum(arb.final_amount * scale, 4)} {unitLabel(arb.start_unit)}
+            （差价收益 {arb.final_amount >= 1 ? "+" : ""}{fmtNum((arb.rate - 1) * 100, 2)}%）
+            {arb.total_gold_fee !== null && arb.total_gold_fee !== undefined
+              ? "，金币费合计 " + fmtNum(arb.total_gold_fee * scale, 0) + " 金币"
+              : "，金币费未知（缺少 Currency Exchange 值）"}
+            {arb.net_gold !== null && arb.net_gold !== undefined &&
+              <span>，折算净收益 <b className={arb.net_gold >= 0 ? "pos" : "neg"}>
+                {arb.net_gold >= 0 ? "+" : ""}{fmtNum(arb.net_gold * scale, 0)} 金币</b></span>}
+            ；实际可执行规模受市场挂单深度限制，建议小额多次
+          </div>
+        </div>}
+    </div>
+  );
+}
+
+// 第三部分：最优兑换方案
 function BestPlanSection({ state }) {
   const keys = Object.keys(state.best);
   return (
@@ -486,18 +550,6 @@ function BestPlanSection({ state }) {
             })}
           </tbody>
         </table>}
-      {state.cycles.length > 0 &&
-        <div style={{marginTop: 12}}>
-          <div style={{color: "#7ee787"}}>发现套利机会（循环兑换可增值）：</div>
-          {state.cycles.map((c, i) => (
-            <div key={i} style={{marginTop: 6}}>
-              <b className="pos">+{fmtNum((c.rate - 1) * 100, 2)}%</b>
-              <span className="swap"/>
-              <PathView path={c.path} icons={state.unit_icons}/>
-              <span className="swap">→</span> {unitLabel(c.path[0].from_unit)}
-            </div>
-          ))}
-        </div>}
     </div>
   );
 }
@@ -543,9 +595,10 @@ function TradePage({ category }) {
     <div className="main">
       <h2>交易 · {meta.label}</h2>
       <div className="meta-line">
-        {meta.source}；页面只读展示，按最新比例自动计算最优兑换路径与套利机会
+        {meta.source}；页面只读展示，按最新比例自动计算最优兑换路径与最佳套利方案
       </div>
       <MarketRatePanel state={state} reload={load}/>
+      <ArbitragePanel state={state}/>
       <BestPlanSection state={state}/>
       <TradeHistory state={state} reload={load}/>
     </div>

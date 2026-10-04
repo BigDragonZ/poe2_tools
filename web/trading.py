@@ -1,4 +1,4 @@
-"""交易页纯逻辑：汇率图、最优兑换路径、套利环检测、金币折算。
+"""交易页纯逻辑：汇率图、最优兑换路径、套利环检测、最优套利方案展开、金币折算。
 
 汇率以「边」表示：from_unit --(amount_from -> amount_to)--> to_unit。
 基础通货 unit 固定为 exalted / chaos / divine，物品 unit 为 "item:名称"。
@@ -123,9 +123,10 @@ def best_conversion(rates, src, dst, gold_values=None):
 
 
 def find_profitable_cycles(rates, gold_values=None, min_profit=1e-9):
-    """枚举兑换率乘积 > 1 的简单环（套利机会）。
+    """枚举简单兑换环，按收益率（有效汇率乘积）降序返回 [{"rate", "path"}]。
 
-    返回 [{"rate", "path"}] 按收益率降序；同一环的旋转视为同一个环。
+    默认只保留乘积 > 1 + min_profit 的环（套利机会）；min_profit=None 时
+    不过滤，返回全部环。同一环的旋转视为同一个环。
     """
     graph = build_graph(rates)
     found = {}
@@ -136,7 +137,7 @@ def find_profitable_cycles(rates, gold_values=None, min_profit=1e-9):
             if nxt == start and path:
                 cycle_path = path + [e]
                 rate = acc * effective_rate(e, gold_values)
-                if rate > 1.0 + min_profit:
+                if min_profit is None or rate > 1.0 + min_profit:
                     units = [p["from_unit"] for p in cycle_path]
                     key = min(tuple(units[i:] + units[:i]) for i in range(len(units)))
                     if key not in found or found[key]["rate"] < rate:
@@ -149,3 +150,78 @@ def find_profitable_cycles(rates, gold_values=None, min_profit=1e-9):
     for start in list(graph.keys()):
         dfs(start, start, 1.0, [], {start})
     return sorted(found.values(), key=lambda c: c["rate"], reverse=True)
+
+
+def cycle_plan(cycle, gold_values=None):
+    """把兑换环展开为以 1 个起点通货为基准的可执行步骤明细。
+
+    执行模型（用户持有金币与通货）：每步按原始市场比例兑换，买边金币费
+    以金币实付（receive × VE(to)，VE 未知时为 None）。环终值 final_amount
+    为原始比例乘积；net_gold = (final_amount - 1) × VE(起点) - 金币费合计，
+    即每投入 1 个起点通货的净收益（折算金币），任一 VE 缺失时为 None。
+    返回 {"start_unit", "steps", "final_amount", "rate", "total_gold_fee",
+    "net_gold", "profitable"}；净收益未知时 profitable 退化为未计金币费的
+    差价是否为正。
+    """
+    path = cycle["path"]
+    start_unit = path[0]["from_unit"]
+    steps = []
+    amount = 1.0
+    total_gold = 0.0
+    gold_known = True
+    for e in path:
+        r = edge_rate(e)
+        received = amount * r
+        fee = None
+        if e.get("side") == "buy":
+            ve = (gold_values or {}).get(e["to_unit"])
+            if ve and ve > 0:
+                fee = received * ve
+                total_gold += fee
+            else:
+                gold_known = False
+        steps.append({"from_unit": e["from_unit"], "to_unit": e["to_unit"],
+                      "side": e.get("side", "sell"), "rate": r,
+                      "pay": amount, "receive": received, "gold_fee": fee})
+        amount = received
+    ve_start = (gold_values or {}).get(start_unit)
+    net_gold = None
+    roi = None
+    if gold_known and ve_start and ve_start > 0:
+        net_gold = (amount - 1.0) * ve_start - total_gold
+        roi = net_gold / ve_start
+    return {"start_unit": start_unit, "steps": steps,
+            "final_amount": amount, "rate": amount,
+            "total_gold_fee": total_gold if gold_known else None,
+            "net_gold": net_gold, "roi": roi,
+            "profitable": net_gold > 0 if net_gold is not None else amount > 1.0}
+
+
+def best_arbitrage(rates, gold_values=None):
+    """最优套利方案：全部简单环（含各旋转起点）中净收益率最高者，展开为步骤明细。
+
+    买卖差价套利：用户持有三种通货与金币，沿环低买高卖一圈回到起点通货，
+    金币费以金币实付。环的每个旋转是不同的执行方式（各步交易量相对大小
+    不同、金币费不同），故逐旋转计算净收益率 roi = 每 1 个起点通货的净收益
+    （起点通货计）= (环终值 - 1) - 金币费 / VE(起点)，取全局最高。VE 缺失
+    导致净收益未知的环退化为按原始比例乘积（未计金币费）排在已知环之后。
+    无环时返回 None；最高净收益不盈利时照常返回（profitable=False，供参考
+    差价距离）。
+    """
+    cycles = find_profitable_cycles(rates, gold_values, min_profit=None)
+    if not cycles:
+        return None
+    best = None
+    best_key = None
+    for c in cycles:
+        path = c["path"]
+        for i in range(len(path)):
+            rot = path[i:] + path[:i]
+            plan = cycle_plan({"path": rot}, gold_values)
+            key = ((1, plan["roi"]) if plan["roi"] is not None
+                   else (0, plan["final_amount"]))
+            if best_key is None or key > best_key:
+                best_key = key
+                best = plan
+                best["path"] = rot
+    return best

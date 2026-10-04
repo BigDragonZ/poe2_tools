@@ -228,7 +228,7 @@ def _gold_values():
 
 @app.get("/api/trade/state")
 def api_trade_state(category: str = "default"):
-    """交易页全量状态：最新汇率、历史、最优方案、套利环、金币转化比例。
+    """交易页全量状态：最新汇率、历史、最优方案、最优套利方案、金币转化比例。
 
     category 对应交易菜单三级页面：default（默认）/ custom（指定）/ auto（自动），
     数据由游玩工具交易模块对应子标签抓取同步（桌面端直接写库，本页面只读展示）。
@@ -259,7 +259,7 @@ def api_trade_state(category: str = "default"):
         "latest": latest,
         "history": db.list_trade_rates(30, category),
         "best": best,
-        "cycles": trading.find_profitable_cycles(latest, gv),
+        "arbitrage": trading.best_arbitrage(latest, gv),
         "gold_values": gold_values,
         "gold_conversion": trading.gold_conversion(latest, gv),
         "unit_icons": _trade_unit_icons(latest),
