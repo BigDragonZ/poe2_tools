@@ -5,7 +5,8 @@
 #   web     = 经济记录 Web 应用（uv run python -m web.app，http://127.0.0.1:8321）
 #   desktop = Python 桌面端主界面（uv run python main.py，tkinter）
 #
-# 统一管理脚本：scripts/app.sh（Git Bash 与 PowerShell 中都可以用 bash 调用）
+# 统一管理脚本：scripts/app.sh（Git Bash / WSL / PowerShell 均可，内部自动调用
+# powershell.exe 操作 Windows 进程，不依赖当前 shell 的 netstat/uv）
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -35,7 +36,7 @@ tail -f logs/web.log        # Web 应用日志
 tail -f logs/desktop.log    # 桌面端日志
 
 # -----------------------------------------------------------------------------
-# 二、单条命令（不依赖脚本，Git Bash）
+# 二、单条命令（不依赖脚本，仅限 Git Bash；WSL 无 netstat/uv 请用脚本）
 # -----------------------------------------------------------------------------
 
 # 查 8321 端口占用（最后一列是 PID）
@@ -66,6 +67,13 @@ Stop-Process -Id <PID> -Force
 # 前台启动（当前窗口独占，Ctrl+C 停止）
 uv run python -m web.app      # Web 应用
 uv run python main.py         # 桌面端
+
+# 后台启动（隐藏窗口，日志写入 logs/，每次启动覆盖）
+Start-Process cmd -ArgumentList '/c uv run python -m web.app > logs\web.log 2>&1' -WorkingDirectory 'D:\game\poe2_tools' -WindowStyle Hidden
+Start-Process cmd -ArgumentList '/c uv run python main.py > logs\desktop.log 2>&1' -WorkingDirectory 'D:\game\poe2_tools' -WindowStyle Hidden
+
+# 按端口查 PID 的另一种方式（不依赖 netstat）
+(Get-NetTCPConnection -LocalPort 8321 -State Listen).OwningProcess
 
 # -----------------------------------------------------------------------------
 # 常见问题
