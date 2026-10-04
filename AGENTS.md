@@ -69,7 +69,7 @@ D:/game/poe2_tools/
 │   ├── modules/            # 业务模块：背包整理、石碑速点、地图速点、战斗宏、批量操作核心、开发测量（measure.py：范围规范化 + 左键框选会话）
 │   │   └── mapping/        # 刷图自动化：dxcam 截图 + 视觉仲裁 FSM + SendInput 执行 + F5/右键两角标记 Q6 区域（calibrate.py）+ 文件日志（mlog.py → logs/mapping.log）
 │   │   └── recorder/       # 测试页输入记录：F2 采集鼠标/Q/E 按下（recorder.py → logs/recordings/）+ 释放频率分析（analysis.py 纯逻辑）
-│   │   └── market/         # 通货市场比例抓取：UI 原子驱动（driver.py）+ OCR 文本解析（parser.py 纯逻辑）+ RapidOCR 封装（ocr.py）+ 双向抓取控制器（scanner.py，坐标复用 [Measure] point1~5/range3）+ 默认/指定/自动批量抓取与交易菜单同步（exchange.py → web/data/economy.db，source=auto + category=default/custom/auto 整批替换只留最近一次抓取，含双向一致性复核：价差超 10 倍的异常对不发布）+ 自动套利编排（arbitrage.py：通货快照候选筛选 + auto_pairs + category=auto）
+│   │   └── market/         # 通货市场比例抓取：UI 原子驱动（driver.py）+ OCR 文本解析（parser.py 纯逻辑）+ RapidOCR 封装（ocr.py）+ 双向抓取控制器（scanner.py，坐标复用 [Measure] point1~5/range3/range5）+ 默认/指定/自动批量抓取与交易菜单同步（exchange.py → web/data/economy.db，source=auto + category=default/custom/auto 整批替换只留最近一次抓取，含双向一致性复核：价差超 10 倍的异常对不发布；抓取前置「沒有存貨」检查：range5 区域识别到无存货提示则该方向按无挂单处理）+ 自动套利编排（arbitrage.py：通货快照候选筛选 + auto_pairs + category=auto）
 │   ├── bridge/             # 进程内事件总线（bus）与可选 WebSocket 桥接
 │   └── ui/                 # tkinter 界面（运行状态区 + 顶部模块导航 + 模块内高内聚配置，2026-10-03 重构）
 │       ├── app.py          # 主窗口与控制器：状态区 + 模块导航 + StackedView 四模块 + 热键注册 + 标定/急停

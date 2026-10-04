@@ -25,6 +25,9 @@ from dataclasses import dataclass
 # 库存特征：中文「库存」或英文 Stock 的常见 OCR 变体
 _STOCK_RE = re.compile(r"库存|[s5]t[o0]ck", re.IGNORECASE)
 
+# 无存货特征：市场不存在此类交易时结果区显示「沒有存貨」（简繁与漏字容错）
+_NO_STOCK_RE = re.compile(r"[沒没]有?存[貨货]")
+
 # 兑换比例：数字 : 数字 或 数字 / 数字（支持小数与千分位）
 _RATIO_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*[:：/]\s*(\d[\d,]*(?:\.\d+)?)")
 
@@ -60,6 +63,14 @@ def _normalize(text: str) -> str:
 def has_stock_feature(line: str) -> bool:
     """判断一行文本是否含库存特征（模糊匹配）。"""
     return bool(_STOCK_RE.search(_normalize(line)))
+
+
+def has_no_stock_text(texts: list[str]) -> bool:
+    """判断文本块中是否含「沒有存貨」提示：市场不存在此类交易（该方向无挂单）。
+
+    简繁混排与「有」字漏识别均容错；归一化去空白后匹配，空格断字不影响。
+    """
+    return any(_NO_STOCK_RE.search(_normalize(t)) for t in texts)
 
 
 def _to_number(raw: str) -> int | float:

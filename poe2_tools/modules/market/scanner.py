@@ -5,13 +5,16 @@
 
 流程（游戏内置交易市场界面）：
 1. Phase 1（B 换 A）：WANT 选通货 A → HAVE 选通货 B → 点市场比率 →
-   截屏结果面板 → OCR 解析得到 result_b_to_a
+   无存货前置检查（截 range5 区域 OCR，含「沒有存貨」则该方向无此类交易，
+   按空挂单处理，避免 OCR 到残留面板产生假比例）→ 截屏结果面板 →
+   OCR 解析得到 result_b_to_a
 2. Phase 2（A 换 B）：Ctrl+左键点「我需要的」反转选中 → 点市场比率 →
-   截屏 → OCR 解析得到 result_a_to_b
+   同样的无存货前置检查 → 截屏 → OCR 解析得到 result_a_to_b
 
 坐标复用开发页测量槽位（[Measure]）：point1~5 = 我需要的/我拥有的/
-搜索框/市场比率按键/搜索结果首项，range3 = 结果面板；未标定抛
-UnsetCoordinateError。driver/ocr 可注入替身，便于纯逻辑单测。
+搜索框/市场比率按键/搜索结果首项，range3 = 结果面板，range5 = 无存货
+检查区（「沒有存貨」提示文字区域）；未标定抛 UnsetCoordinateError。
+driver/ocr 可注入替身，便于纯逻辑单测。
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ from typing import TYPE_CHECKING
 from poe2_tools.config.settings import Point, Settings
 from poe2_tools.modules.market.driver import UIActionDriver, copy_to_clipboard
 from poe2_tools.modules.market.ocr import OcrEngine, RapidOcrEngine
-from poe2_tools.modules.market.parser import parse_market_blocks
+from poe2_tools.modules.market.parser import has_no_stock_text, parse_market_blocks
 
 if TYPE_CHECKING:
     from PIL import Image
@@ -45,6 +48,14 @@ POINT_SLOTS = {
     "搜索结果首项": 5,
 }
 RESULT_RANGE_SLOT = 3
+# 无存货检查区：市场比率面板中「沒有存貨」提示文字所在区域（截图前置检查用）
+NO_STOCK_RANGE_SLOT = 5
+
+# 框选范围槽位 → 用途名（preflight 报错提示用）
+RANGE_SLOTS = {
+    RESULT_RANGE_SLOT: "结果面板",
+    NO_STOCK_RANGE_SLOT: "无存货检查区",
+}
 
 
 def _debug_name(phase: str, currency_a: str, currency_b: str) -> str:
@@ -100,12 +111,12 @@ class CurrencyTradeScanner:
             )
         return {name: points[slot] for name, slot in POINT_SLOTS.items()}
 
-    def _result_range(self) -> tuple[int, int, int, int]:
-        """取结果面板框选范围（含配置偏移修正）；未标定抛 UnsetCoordinateError。"""
-        rect = self.settings.dev.measure_ranges.get(RESULT_RANGE_SLOT)
+    def _measure_rect(self, slot: int) -> tuple[int, int, int, int]:
+        """取指定框选范围（含配置偏移修正）；未标定抛 UnsetCoordinateError。"""
+        rect = self.settings.dev.measure_ranges.get(slot)
         if rect is None:
             raise UnsetCoordinateError(
-                f"结果面板范围未标定（开发页框选 range{RESULT_RANGE_SLOT}）"
+                f"{RANGE_SLOTS.get(slot, '范围')}范围未标定（开发页框选 range{slot}）"
             )
         ox = self.settings.market_scan.range_offset_x
         oy = self.settings.market_scan.range_offset_y
@@ -114,7 +125,12 @@ class CurrencyTradeScanner:
     def preflight(self) -> None:
         """执行前校验坐标与范围完整，不满足时抛 UnsetCoordinateError。"""
         self._required_points()
-        self._result_range()
+        missing = [f"{name}（range{slot}）" for slot, name in RANGE_SLOTS.items()
+                   if slot not in self.settings.dev.measure_ranges]
+        if missing:
+            raise UnsetCoordinateError(
+                "市场框选范围未标定：" + "、".join(missing) + "（请在开发页框选后重试）"
+            )
 
     # --------------------------------------------------------
     # 搜索子流程
@@ -186,6 +202,28 @@ class CurrencyTradeScanner:
         return self._capture_and_parse(rect, name)
 
     # --------------------------------------------------------
+    # 无存货前置检查
+    # --------------------------------------------------------
+    def _has_no_stock(self, rect: tuple[int, int, int, int], name: str) -> bool:
+        """截取无存货检查区（range5）OCR，含「沒有存貨」提示时返回 True。
+
+        市场不存在此类交易时结果区显示「沒有存貨」；此时若继续截结果面板，
+        会 OCR 到上一对的残留面板产生假比例。检查失败（截屏/OCR 异常）记告警
+        并返回 False（按有交易继续，不阻断抓取）。
+        """
+        try:
+            image = self._driver.capture_region(rect)
+            texts = [b.text for b in self._ocr.recognize_blocks(image)]
+        except Exception as exc:
+            self.log(f"无存货检查失败（{name}）：{exc}", "WARN")
+            return False
+        self.log(f"无存货检查区 OCR：{' | '.join(texts) or '（空）'}", "DEBUG")
+        if has_no_stock_text(texts):
+            self._save_debug_image(image, f"{name}_nostock")
+            return True
+        return False
+
+    # --------------------------------------------------------
     # 主流程
     # --------------------------------------------------------
     def scan(self, currency_a: str, currency_b: str) -> dict:
@@ -196,7 +234,8 @@ class CurrencyTradeScanner:
         """
         self.preflight()
         points = self._required_points()
-        rect = self._result_range()
+        rect = self._measure_rect(RESULT_RANGE_SLOT)
+        no_stock_rect = self._measure_rect(NO_STOCK_RANGE_SLOT)
 
         # Phase 1：B 换 A（想要 A，付出 B）
         self.log(f"市场抓取：{currency_b} → {currency_a}")
@@ -204,8 +243,12 @@ class CurrencyTradeScanner:
         self.search_and_select(MODE_HAVE, currency_b)
         self._driver.click_position(points["市场比率按键"])
         self._driver.sleep_ms(self._ui_refresh_delay_ms)
-        result_b_to_a = self._capture_with_retry(
-            rect, _debug_name("b_to_a", currency_a, currency_b), points)
+        name_b_to_a = _debug_name("b_to_a", currency_a, currency_b)
+        if self._has_no_stock(no_stock_rect, name_b_to_a):
+            self.log(f"{currency_b} → {currency_a}：市场显示沒有存貨，无此类交易")
+            result_b_to_a = []
+        else:
+            result_b_to_a = self._capture_with_retry(rect, name_b_to_a, points)
         self.log(f"{currency_b} → {currency_a}：{len(result_b_to_a)} 条挂单")
 
         # Phase 2：A 换 B（Ctrl+左键点「我需要的」反转选中方向）
@@ -213,8 +256,12 @@ class CurrencyTradeScanner:
         self._driver.click_position(points["我需要的"], modifier="Ctrl")
         self._driver.click_position(points["市场比率按键"])
         self._driver.sleep_ms(self._ui_refresh_delay_ms)
-        result_a_to_b = self._capture_with_retry(
-            rect, _debug_name("a_to_b", currency_a, currency_b), points)
+        name_a_to_b = _debug_name("a_to_b", currency_a, currency_b)
+        if self._has_no_stock(no_stock_rect, name_a_to_b):
+            self.log(f"{currency_a} → {currency_b}：市场显示沒有存貨，无此类交易")
+            result_a_to_b = []
+        else:
+            result_a_to_b = self._capture_with_retry(rect, name_a_to_b, points)
         self.log(f"{currency_a} → {currency_b}：{len(result_a_to_b)} 条挂单")
 
         return {

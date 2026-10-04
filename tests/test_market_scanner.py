@@ -15,11 +15,13 @@ from poe2_tools.config.settings import (
 from poe2_tools.modules.market import scanner as scanner_mod
 from poe2_tools.modules.market.parser import (
     TextBlock,
+    has_no_stock_text,
     has_stock_feature,
     parse_market_blocks,
     parse_market_lines,
 )
 from poe2_tools.modules.market.scanner import (
+    NO_STOCK_RANGE_SLOT,
     POINT_SLOTS,
     RESULT_RANGE_SLOT,
     CurrencyTradeScanner,
@@ -33,6 +35,16 @@ from poe2_tools.modules.market.scanner import (
 def test_has_stock_feature_chinese() -> None:
     assert has_stock_feature("库存 42")
     assert has_stock_feature("库 存：120")  # OCR 字间空格
+
+
+def test_has_no_stock_text() -> None:
+    """「沒有存貨」提示识别：简繁、空格断字、漏「有」均容错；普通挂单不误判。"""
+    assert has_no_stock_text(["沒有存貨"])
+    assert has_no_stock_text(["没有存货"])
+    assert has_no_stock_text(["沒 有 存 貨"])  # OCR 字间空格
+    assert has_no_stock_text(["比率", "沒存貨"])  # 漏「有」字容错
+    assert not has_no_stock_text(["1:155 库存 120"])  # 「库存」不是无存货
+    assert not has_no_stock_text([])
 
 
 def test_has_stock_feature_english_fuzzy() -> None:
@@ -202,6 +214,7 @@ def _calibrated_settings() -> Settings:
     for slot in POINT_SLOTS.values():
         s.dev.measure_points[slot] = Point(slot * 10, slot * 100)
     s.dev.measure_ranges[RESULT_RANGE_SLOT] = (50, 60, 500, 600)
+    s.dev.measure_ranges[NO_STOCK_RANGE_SLOT] = (60, 70, 300, 120)
     return s
 
 
@@ -221,10 +234,12 @@ def test_scan_full_workflow(monkeypatch: pytest.MonkeyPatch) -> None:
     ocr = FakeOcr({})
     scan, clipboard = _make_scanner(monkeypatch, settings, ocr, driver)
 
-    # 预先按调用顺序准备 OCR 结果：先 b_to_a，后 a_to_b
+    # 预先按调用顺序准备 OCR 结果：每阶段先无存货检查（range5），后结果面板（range3）
     results = iter([
-        ["1:155 库存 120"],
-        ["158:1 Stock 450", "1:1 无特征行"],
+        [],                          # Phase1 无存货检查：无提示
+        ["1:155 库存 120"],          # Phase1 结果面板
+        [],                          # Phase2 无存货检查：无提示
+        ["158:1 Stock 450", "1:1 无特征行"],  # Phase2 结果面板
     ])
 
     def fake_blocks(image) -> list[TextBlock]:
@@ -249,16 +264,17 @@ def test_scan_full_workflow(monkeypatch: pytest.MonkeyPatch) -> None:
     # 剪贴板顺序：先 WANT(A) 后 HAVE(B)
     assert clipboard == ["Divine Orb", "Chaos Orb"]
 
-    # 关键调用序列：Phase1 搜索×2 → 比率键 → 截屏；Phase2 Ctrl 反转 → 比率键 → 截屏
+    # 关键调用序列：Phase1 搜索×2 → 比率键 → 检查区截屏 → 面板截屏；Phase2 同理
     clicks = [c for c in driver.calls if c[0] == "click"]
     captures = [c for c in driver.calls if c[0] == "capture"]
     pastes = [c for c in driver.calls if c[0] == "paste"]
-    assert len(pastes) == 2 and len(captures) == 2
+    assert len(pastes) == 2 and len(captures) == 4
     # Ctrl 修饰点击只出现一次，目标是「我需要的」(point1 = (10, 100))
     ctrl_clicks = [c for c in clicks if c[3] == "Ctrl"]
     assert ctrl_clicks == [("click", 10, 100, "Ctrl")]
-    # 截屏范围是 range3 加默认偏移（左移 10、下移 20）
-    assert captures[0][1] == (40, 80, 490, 620)
+    # 第 1 次截屏是无存货检查区（range5 加默认偏移），第 2 次是结果面板（range3 加偏移）
+    assert captures[0][1] == (50, 90, 290, 140)
+    assert captures[1][1] == (40, 80, 490, 620)
 
 
 def test_scan_retries_when_first_capture_empty(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -268,11 +284,13 @@ def test_scan_retries_when_first_capture_empty(monkeypatch: pytest.MonkeyPatch) 
     ocr = FakeOcr({})
     scan, _ = _make_scanner(monkeypatch, settings, ocr, driver)
 
-    # b_to_a：首次空、重试有数据；a_to_b：首次即有数据（不重试）
+    # b_to_a：检查区无提示 → 面板首次空、重试有数据；a_to_b：检查区无提示 → 面板即有数据
     results = iter([
+        [],
         [],
         [TextBlock(text="1:155", cx=150.0, cy=10.0, h=12.0),
          TextBlock(text="875.556", cx=50.0, cy=10.0, h=12.0)],
+        [],
         [TextBlock(text="158:1 库存 450", cx=100.0, cy=10.0, h=12.0)],
     ])
     ocr.recognize_blocks = lambda image: next(results)  # type: ignore[method-assign]
@@ -300,6 +318,28 @@ def test_scan_no_offers_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     }
 
 
+def test_scan_no_stock_skips_panel_capture(monkeypatch: pytest.MonkeyPatch) -> None:
+    """无存货检查区识别到「沒有存貨」→ 该方向按无挂单处理，不再截结果面板。"""
+    settings = _calibrated_settings()
+    driver = FakeDriver()
+    # 按 OCR 调用顺序：Phase1 检查区（命中沒有存貨）→ Phase2 检查区 → Phase2 面板
+    results = iter([
+        [TextBlock(text="沒有存貨", cx=0.0, cy=0.0, h=12.0)],
+        [TextBlock(text="比 率", cx=0.0, cy=0.0, h=12.0)],
+        [TextBlock(text="158:1 库存 450", cx=100.0, cy=10.0, h=12.0)],
+    ])
+    ocr = FakeOcr({})
+    ocr.recognize_blocks = lambda image: next(results)  # type: ignore[method-assign]
+    scan, _ = _make_scanner(monkeypatch, settings, ocr, driver)
+
+    out = scan.scan("Divine Orb", "Chaos Orb")
+    assert out["b_to_a"] == []  # 无此类交易
+    assert out["a_to_b"] == [{"rank": 1, "ratio": "158:1", "stock": 450}]
+    # 只截了 3 次：Phase1 检查区、Phase2 检查区、Phase2 面板（Phase1 面板被跳过）
+    captures = [c for c in driver.calls if c[0] == "capture"]
+    assert len(captures) == 3
+
+
 def test_scan_unset_coordinate_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """缺任一坐标点或范围 → UnsetCoordinateError，且不产生任何点击。"""
     settings = Settings()  # 全部未标定
@@ -314,6 +354,12 @@ def test_scan_unset_coordinate_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(UnsetCoordinateError):
         scan2.scan("Divine Orb", "Chaos Orb")
     assert driver2.calls == []  # 校验失败时不执行任何动作
+
+    settings3 = _calibrated_settings()
+    del settings3.dev.measure_ranges[NO_STOCK_RANGE_SLOT]  # 缺无存货检查区同样拦截
+    with pytest.raises(UnsetCoordinateError):
+        scan3, _ = _make_scanner(monkeypatch, settings3, FakeOcr({}), FakeDriver())
+        scan3.scan("Divine Orb", "Chaos Orb")
 
 
 # ============================================================
