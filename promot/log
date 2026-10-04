@@ -1,0 +1,82 @@
+[15:12:58] 已加载配置：D:\game\poe2_tools\poe2_tools.ini
+[15:12:59] 控制台已启动。战斗: F2，整理: F1，石碑: F6，地图: F7，市场抓取: F8，默认通货: F9，指定通货: F10，标定: F3/F4/F5，记录: F2，急停: F12（功能热键作用于当前激活配置，标定/记录各归其页）
+[15:13:13] 自动套利候选：5 个通货（0.5~20.0 神圣）
+[15:13:13] 批量抓取：Perfect Chaos Orb ↔ Exalted Orb
+[15:13:13] 市场抓取：Exalted Orb → Perfect Chaos Orb
+[15:13:23] Exalted Orb → Perfect Chaos Orb：1 条挂单
+[15:13:23] 市场抓取：Perfect Chaos Orb → Exalted Orb
+[15:13:26] Perfect Chaos Orb → Exalted Orb：3 条挂单
+[15:13:26] 抓取复核异常（Perfect Chaos Orb ↔ Exalted Orb）：Perfect Chaos Orb ↔ Exalted Orb：双向买价乘积 2470.0000 ≥ 1，可能存在 OCR 或方向识别异常
+[15:13:26] 批量抓取：Perfect Chaos Orb ↔ Chaos Orb
+[15:13:26] 市场抓取：Chaos Orb → Perfect Chaos Orb
+[15:13:35] Chaos Orb → Perfect Chaos Orb：3 条挂单
+[15:13:35] 市场抓取：Perfect Chaos Orb → Chaos Orb
+[15:13:38] Perfect Chaos Orb → Chaos Orb：3 条挂单
+[15:13:38] 批量抓取：Perfect Chaos Orb ↔ Divine Orb
+[15:13:38] 市场抓取：Divine Orb → Perfect Chaos Orb
+[15:13:47] Divine Orb → Perfect Chaos Orb：3 条挂单
+[15:13:47] 市场抓取：Perfect Chaos Orb → Divine Orb
+[15:13:50] Perfect Chaos Orb → Divine Orb：3 条挂单
+[15:13:50] 批量抓取：Fracturing Orb ↔ Exalted Orb
+[15:13:50] 市场抓取：Exalted Orb → Fracturing Orb
+[15:13:58] Exalted Orb → Fracturing Orb：3 条挂单
+[15:13:58] 市场抓取：Fracturing Orb → Exalted Orb
+[15:14:02] Fracturing Orb → Exalted Orb：3 条挂单
+[15:14:02] 批量抓取：Fracturing Orb ↔ Chaos Orb
+[15:14:02] 市场抓取：Chaos Orb → Fracturing Orb
+[15:14:10] Chaos Orb → Fracturing Orb：3 条挂单
+[15:14:10] 市场抓取：Fracturing Orb → Chaos Orb
+[15:14:13] Fracturing Orb → Chaos Orb：3 条挂单
+[15:14:13] 批量抓取：Fracturing Orb ↔ Divine Orb
+[15:14:14] 市场抓取：Divine Orb → Fracturing Orb
+[15:14:22] Divine Orb → Fracturing Orb：3 条挂单
+[15:14:22] 市场抓取：Fracturing Orb → Divine Orb
+[15:14:25] Fracturing Orb → Divine Orb：3 条挂单
+[15:14:25] 批量抓取：Perfect Exalted Orb ↔ Exalted Orb
+[15:14:25] 市场抓取：Exalted Orb → Perfect Exalted Orb
+[15:14:34] Exalted Orb → Perfect Exalted Orb：3 条挂单
+[15:14:34] 市场抓取：Perfect Exalted Orb → Exalted Orb
+[15:14:37] Perfect Exalted Orb → Exalted Orb：3 条挂单
+[15:14:37] 批量抓取：Perfect Exalted Orb ↔ Chaos Orb
+[15:14:37] 市场抓取：Chaos Orb → Perfect Exalted Orb
+[15:14:45] Chaos Orb → Perfect Exalted Orb：3 条挂单
+[15:14:45] 市场抓取：Perfect Exalted Orb → Chaos Orb
+[15:14:48] Perfect Exalted Orb → Chaos Orb：3 条挂单
+[15:14:48] 批量抓取：Perfect Exalted Orb ↔ Divine Orb
+[15:14:48] 市场抓取：Divine Orb → Perfect Exalted Orb
+[15:14:56] Divine Orb → Perfect Exalted Orb：3 条挂单
+[15:14:56] 市场抓取：Perfect Exalted Orb → Divine Orb
+[15:14:59] Perfect Exalted Orb → Divine Orb：3 条挂单
+[15:14:59] 批量抓取：Cryptic Key ↔ Exalted Orb
+[15:14:59] 市场抓取：Exalted Orb → Cryptic Key
+[15:15:08] Exalted Orb → Cryptic Key：3 条挂单
+[15:15:08] 市场抓取：Cryptic Key → Exalted Orb
+[15:15:11] Cryptic Key → Exalted Orb：3 条挂单
+[15:15:11] 批量抓取：Cryptic Key ↔ Chaos Orb
+[15:15:11] 市场抓取：Chaos Orb → Cryptic Key
+[15:15:20] Chaos Orb → Cryptic Key：3 条挂单
+[15:15:20] 市场抓取：Cryptic Key → Chaos Orb
+[15:15:22] Cryptic Key → Chaos Orb：3 条挂单
+[15:15:22] 批量抓取：Cryptic Key ↔ Divine Orb
+[15:15:22] 市场抓取：Divine Orb → Cryptic Key
+[15:15:32] Divine Orb → Cryptic Key：3 条挂单
+[15:15:32] 市场抓取：Cryptic Key → Divine Orb
+[15:15:35] Cryptic Key → Divine Orb：3 条挂单
+[15:15:35] 批量抓取：Perfect Jeweller's Orb ↔ Exalted Orb
+[15:15:35] 市场抓取：Exalted Orb → Perfect Jeweller's Orb
+[15:15:44] Exalted Orb → Perfect Jeweller's Orb：3 条挂单
+[15:15:44] 市场抓取：Perfect Jeweller's Orb → Exalted Orb
+[15:15:47] Perfect Jeweller's Orb → Exalted Orb：3 条挂单
+[15:15:47] 批量抓取：Perfect Jeweller's Orb ↔ Chaos Orb
+[15:15:47] 市场抓取：Chaos Orb → Perfect Jeweller's Orb
+[15:15:56] Chaos Orb → Perfect Jeweller's Orb：3 条挂单
+[15:15:56] 市场抓取：Perfect Jeweller's Orb → Chaos Orb
+[15:15:59] Perfect Jeweller's Orb → Chaos Orb：3 条挂单
+[15:15:59] 批量抓取：Perfect Jeweller's Orb ↔ Divine Orb
+[15:15:59] 市场抓取：Divine Orb → Perfect Jeweller's Orb
+[15:16:07] Divine Orb → Perfect Jeweller's Orb：3 条挂单
+[15:16:07] 市场抓取：Perfect Jeweller's Orb → Divine Orb
+[15:16:10] Perfect Jeweller's Orb → Divine Orb：3 条挂单
+[15:16:10] 已同步 30 条比例到交易·自动页
+[15:16:10] 自动套利抓取完成：5 个候选、15 对，已同步 30 条比例到交易·自动页
+

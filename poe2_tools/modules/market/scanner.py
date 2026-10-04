@@ -16,6 +16,7 @@ UnsetCoordinateError。driver/ocr 可注入替身，便于纯逻辑单测。
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -28,7 +29,7 @@ from poe2_tools.modules.market.parser import parse_market_blocks
 if TYPE_CHECKING:
     from PIL import Image
 
-# 抓取调试截图目录（每次抓取覆盖同名文件，便于人工核对截屏区域）
+# 抓取调试截图目录（按 阶段+通货对 命名，同对重复抓取覆盖，便于人工核对每对截屏区域）
 DEBUG_DIR = Path(__file__).resolve().parent.parent.parent.parent / "logs" / "market"
 
 # 「我需要的」/「我拥有的」选择模式
@@ -44,6 +45,12 @@ POINT_SLOTS = {
     "搜索结果首项": 5,
 }
 RESULT_RANGE_SLOT = 3
+
+
+def _debug_name(phase: str, currency_a: str, currency_b: str) -> str:
+    """调试图文件名：阶段 + 通货对（非法字符转下划线，同对重复抓取覆盖）。"""
+    slug = lambda s: re.sub(r"[^0-9A-Za-z一-鿿]+", "_", s).strip("_")
+    return f"{phase}_{slug(currency_a)}__{slug(currency_b)}"
 
 
 class UnsetCoordinateError(Exception):
@@ -197,7 +204,8 @@ class CurrencyTradeScanner:
         self.search_and_select(MODE_HAVE, currency_b)
         self._driver.click_position(points["市场比率按键"])
         self._driver.sleep_ms(self._ui_refresh_delay_ms)
-        result_b_to_a = self._capture_with_retry(rect, "b_to_a", points)
+        result_b_to_a = self._capture_with_retry(
+            rect, _debug_name("b_to_a", currency_a, currency_b), points)
         self.log(f"{currency_b} → {currency_a}：{len(result_b_to_a)} 条挂单")
 
         # Phase 2：A 换 B（Ctrl+左键点「我需要的」反转选中方向）
@@ -205,7 +213,8 @@ class CurrencyTradeScanner:
         self._driver.click_position(points["我需要的"], modifier="Ctrl")
         self._driver.click_position(points["市场比率按键"])
         self._driver.sleep_ms(self._ui_refresh_delay_ms)
-        result_a_to_b = self._capture_with_retry(rect, "a_to_b", points)
+        result_a_to_b = self._capture_with_retry(
+            rect, _debug_name("a_to_b", currency_a, currency_b), points)
         self.log(f"{currency_a} → {currency_b}：{len(result_a_to_b)} 条挂单")
 
         return {

@@ -22,7 +22,7 @@
 | 刷图自动化 | 待人工验证 | 三线程（dxcam 截图/视觉仲裁/SendInput 执行）+ 确定性 FSM；侧键切换移动/拾取/连招，Q=6 检测用 F5 + 右键两角标记区域（poe2_tools/modules/mapping/，控制并入「旋风」页） |
 | 测试页（输入记录分析） | 待人工验证 | F2 切换记录鼠标按键与 Q/E 按下，按轮存 logs/recordings/；分析过滤自动重复/抖动、排除停顿，提取技能释放频率（poe2_tools/modules/recorder/，「测试」页） |
 | 开发页（测量坐标与框选范围） | 待人工验证 | 收集开发阶段信息：6 个测量坐标（按钮 + F5，同坐标模块流程）+ 6 个框选范围（开启后左键拖框），结果存 ini [Measure] 段（poe2_tools/modules/measure.py，「开发」页） |
-| 交易模块（市场比例抓取） | 待人工验证 | 内嵌 默认通货/指定/自动/比例测试 子标签：默认=三默认通货两两抓取（F9）、指定=指定通货×三默认（F10），比例写 web/data/economy.db（source=auto + category 区分页面，同类别同方向只留最近一次），分别输出到 Web 交易菜单「默认」「指定」页（自动页预留），最佳兑换与金币折算由对应页面计算展示；比例测试=A/B 双向抓取调试（F8）（poe2_tools/modules/market/，「交易」页） |
+| 交易模块（市场比例抓取） | 待人工验证 | 内嵌 默认通货/指定/自动/比例测试 子标签：默认=三默认通货两两抓取（F9）、指定=指定通货×三默认（F10）、自动=套利批量抓取（F11：通货快照 0.5~20 神圣候选 × 三默认，比例写 web/data/economy.db（source=auto + category 区分页面，同类别整批替换、只保留最近一次抓取记录），分别输出到 Web 交易菜单「默认」「指定」「自动」页，最佳兑换/金币获取方案/套利复核由对应页面计算展示；比例测试=A/B 双向抓取调试（F8）（poe2_tools/modules/market/，「交易」页） |
 | AHK 按键助手 | 已弃用，待删除 | ahk/ 目录，验证通过前保留作回退 |
 | 地图词缀识别 | 二期规划 | OCR/OpenCV 词缀解析 + 高危词缀警告 |
 | 石碑属性识别 | 二期规划 | 属性识别 + 合成路线推演 |
@@ -69,7 +69,7 @@ D:/game/poe2_tools/
 │   ├── modules/            # 业务模块：背包整理、石碑速点、地图速点、战斗宏、批量操作核心、开发测量（measure.py：范围规范化 + 左键框选会话）
 │   │   └── mapping/        # 刷图自动化：dxcam 截图 + 视觉仲裁 FSM + SendInput 执行 + F5/右键两角标记 Q6 区域（calibrate.py）+ 文件日志（mlog.py → logs/mapping.log）
 │   │   └── recorder/       # 测试页输入记录：F2 采集鼠标/Q/E 按下（recorder.py → logs/recordings/）+ 释放频率分析（analysis.py 纯逻辑）
-│   │   └── market/         # 通货市场比例抓取：UI 原子驱动（driver.py）+ OCR 文本解析（parser.py 纯逻辑）+ RapidOCR 封装（ocr.py）+ 双向抓取控制器（scanner.py，坐标复用 [Measure] point1~5/range3）+ 默认/指定批量抓取与交易菜单同步（exchange.py → web/data/economy.db，source=auto + category=default/custom 只留最近一次）
+│   │   └── market/         # 通货市场比例抓取：UI 原子驱动（driver.py）+ OCR 文本解析（parser.py 纯逻辑）+ RapidOCR 封装（ocr.py）+ 双向抓取控制器（scanner.py，坐标复用 [Measure] point1~5/range3）+ 默认/指定/自动批量抓取与交易菜单同步（exchange.py → web/data/economy.db，source=auto + category=default/custom/auto 整批替换只留最近一次抓取，含双向一致性复核：价差超 10 倍的异常对不发布）+ 自动套利编排（arbitrage.py：通货快照候选筛选 + auto_pairs + category=auto）
 │   ├── bridge/             # 进程内事件总线（bus）与可选 WebSocket 桥接
 │   └── ui/                 # tkinter 界面（运行状态区 + 顶部模块导航 + 模块内高内聚配置，2026-10-03 重构）
 │       ├── app.py          # 主窗口与控制器：状态区 + 模块导航 + StackedView 四模块 + 热键注册 + 标定/急停
@@ -78,7 +78,7 @@ D:/game/poe2_tools/
 │       ├── combat_module.py   # 战斗模块（内嵌 配置1/旋风 子标签 + 战斗宏热键）
 │       ├── general_module.py  # 通用模块（整理/石碑速点/地图速点合并单页：背包网格通用 + 各自参数热键；热键支持按键捕获 + 手动输入）
 │       ├── dev_module.py      # 研发模块（内嵌 开发/测试/坐标 子标签 + 调试模式/日志级别）
-│       ├── trade_module.py    # 交易模块（内嵌 默认通货/指定/自动/比例测试 子标签；批量抓取结果按类别同步 Web 交易·默认/指定页，不在本页展示）
+│       ├── trade_module.py    # 交易模块（内嵌 默认通货/指定/自动/比例测试 子标签；批量抓取结果按类别同步 Web 交易·默认/指定/自动页，不在本页展示；自动页=候选筛选预览+套利批量抓取）
 │       ├── profile_tab.py  # 配置子页（8 行按键策略）
 │       ├── cyclone_tab.py  # 旋疯子页（鼠标三键 + 刷图自动化控制分区）
 │       ├── coords_tab.py   # 坐标子页（10 种货币标定）
@@ -92,10 +92,12 @@ D:/game/poe2_tools/
 │   ├── db.py               # SQLite schema 与读写（写操作全局锁串行化）
 │   ├── icons.py            # 图标下载缓存到本地
 │   ├── service.py          # 刷新任务编排与进度（手动单模块/全量）
-│   ├── trading.py          # 交易页纯逻辑：汇率图、最优兑换路径、套利环检测、最优套利方案展开（消耗金币换通货差价口径）
+│   ├── trading.py          # 交易页纯逻辑：汇率图、最优兑换路径、套利环检测、最优套利方案展开（消耗金币换通货差价口径）+ 套利候选筛选/金币获取方案/方案独立复核 + 持仓口径套利方案（神圣折算金币效率，arbitrage_opportunities/best_arbitrage_plan）
 │   ├── scheduler.py        # APScheduler 定时抓取（开服前 2 周每天抓，之后每周抓，可配置）
 │   ├── static/             # index.html（React 18 CDN 单页）+ icons/（图标缓存，不入库）
 │   └── data/               # economy.db（不入库）
+├── scripts/                # 应用管理脚本（app.sh：启动/关闭/重启/查看 Web 应用与桌面端，日志 → logs/web.log、logs/desktop.log）
+├── 应用管理.sh             # 应用管理命令速查（复制粘贴用，不直接执行）
 ├── poe2_tools.ini          # 本机标定与热键配置（UTF-8，不入库）
 ├── templates/              # 刷图 Q6 模板（q6.png / q6_live.png，界面标定/启动测试生成，不入库）
 ├── logs/                   # 刷图执行日志（mapping.log，不入库）

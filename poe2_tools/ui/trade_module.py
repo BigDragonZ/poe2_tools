@@ -5,10 +5,12 @@
 
 - 「默认通货」：抓取三种默认通货（崇高/混沌/神圣）的两两市场比例，
   同步到 Web「交易 → 默认」页（最佳兑换路径与金币折算由页面计算展示，
-  本页不展示结果；同方向自动记录每次只保留最近一次）
+  本页不展示结果；同类别自动记录整批替换，每次只保留最近一次抓取）
 - 「指定」：输入指定通货游戏内英文全名，抓取其与三种默认通货的市场比例，
   同步到 Web「交易 → 指定」页参与计算
-- 「自动」：预留（定时自动抓取，暂未开放；输出对应 Web「交易 → 自动」页）
+- 「自动」：从 Web 经济数据（通货模块快照）筛选神圣价值区间内的候选通货，
+  批量抓取其与三种默认通货的市场比例，同步到 Web「交易 → 自动」页
+  计算最佳金币获取方案与最佳套利方案
 - 「比例测试」：A/B 双向抓取测试入口与挂单结果展示（调试/标定核对用）
 
 抓取编排逻辑在 modules/market/exchange.py，底层抓取在 modules/market/scanner.py，
@@ -23,9 +25,16 @@ from collections.abc import Callable
 from tkinter import messagebox, ttk
 
 from poe2_tools.config.settings import Settings
+from poe2_tools.modules.market.arbitrage import (
+    ArbitrageDataError,
+    ArbitrageScanRunner,
+    candidates_missing_gold_costs,
+    load_candidates,
+)
 from poe2_tools.modules.market.exchange import (
     CATEGORY_LABELS,
     ExchangeScanRunner,
+    auto_pairs,
     custom_pairs,
     default_pairs,
 )
@@ -35,7 +44,8 @@ HELP_TEXT = (
     "使用：先在「研发 → 开发」页标定市场坐标（point1~5 = 我需要的/我拥有的/搜索框/"
     "市场比率按键/搜索结果首项，range3 = 结果面板），游戏内打开交易市场界面后按对应"
     "启动热键（或点页面按钮）开始抓取。\n"
-    "抓取结果按类别同步到 Web 交易菜单对应页面（默认通货→交易·默认，指定→交易·指定）"
+    "抓取结果按类别同步到 Web 交易菜单对应页面（默认通货→交易·默认，指定→交易·指定，"
+    "自动→交易·自动）"
     "展示并计算最佳兑换比例，每次只保留最近一次；"
     "抓取期间请勿操作键鼠；F12 可随时急停释放按键。"
 )
@@ -51,6 +61,16 @@ CUSTOM_HELP = (
     "市场比例（3 对 × 双向），同步到 Web「交易 → 指定」页参与最佳兑换计算；"
     "结果在该页展示，每次只保留最近一次。"
 )
+
+AUTO_HELP = (
+    "从 Web 经济数据（通货模块快照）筛选神圣价值区间内的候选通货，批量抓取其与三种"
+    "默认通货的市场比例（每通货 3 对 × 双向），同步到 Web「交易 → 自动」页计算三种"
+    "默认通货的最佳金币获取方案与最佳套利方案。需先在 Web 端刷新「经济 → 通货」数据；"
+    "抓取前建议先点「加载候选」确认清单与规模。"
+)
+
+# 预计耗时估算：每对抓取（双向）约 20 秒
+_AUTO_SECONDS_PER_PAIR = 20
 
 _TREE_COLUMNS = ("rank", "ratio", "stock")
 _TREE_HEADINGS = {"rank": "序号", "ratio": "比例", "stock": "库存"}
@@ -155,14 +175,58 @@ class TradeModule(ttk.Frame):
         ).pack(anchor=tk.W, pady=(10, 0))
 
     def _build_auto_tab(self) -> None:
-        """「自动」子页：预留。"""
+        """「自动」子页：候选筛选预览 + 套利批量抓取 + 同步交易·自动页。"""
         tab = ttk.Frame(self.notebook, padding=8)
         self.notebook.add(tab, text="自动")
+
+        frame = ttk.LabelFrame(
+            tab, text="自动套利批量抓取（游戏内需已打开交易市场）", padding=6
+        )
+        frame.pack(fill=tk.X)
+        ttk.Label(frame, text="价值区间:").grid(row=0, column=0, sticky=tk.W)
+        self._auto_lo_var = tk.StringVar()
+        ttk.Entry(frame, textvariable=self._auto_lo_var, width=6).grid(
+            row=0, column=1, sticky=tk.W, padx=(4, 0)
+        )
+        ttk.Label(frame, text="~").grid(row=0, column=2)
+        self._auto_hi_var = tk.StringVar()
+        ttk.Entry(frame, textvariable=self._auto_hi_var, width=6).grid(
+            row=0, column=3, sticky=tk.W, padx=(0, 4)
+        )
+        ttk.Label(frame, text="神圣").grid(row=0, column=4, sticky=tk.W, padx=(0, 12))
+        ttk.Label(frame, text="启动热键:").grid(row=0, column=5, sticky=tk.W)
+        self._hotkey_auto_var = tk.StringVar()
+        ttk.Entry(frame, textvariable=self._hotkey_auto_var, width=10).grid(
+            row=0, column=6, sticky=tk.W, padx=(4, 12)
+        )
+        if self._on_save is not None:
+            ttk.Button(frame, text="保存配置", width=10, command=self._on_save).grid(
+                row=0, column=7, padx=(0, 12)
+            )
+        self._auto_load_button = ttk.Button(
+            frame, text="加载候选", width=10, command=self.load_auto_candidates
+        )
+        self._auto_load_button.grid(row=0, column=8, padx=(0, 8))
+        self._auto_button = ttk.Button(
+            frame, text="开始抓取", width=10, command=self.trigger_auto
+        )
+        self._auto_button.grid(row=0, column=9)
+        ttk.Label(frame, text="状态:").grid(row=1, column=0, sticky=tk.W, pady=(6, 0))
+        self._auto_state_var = tk.StringVar(value="空闲")
+        ttk.Label(frame, textvariable=self._auto_state_var, foreground="#22c55e").grid(
+            row=1, column=1, columnspan=9, sticky=tk.W, padx=(4, 0), pady=(6, 0)
+        )
+
+        self._auto_preview = tk.Text(tab, height=6, wrap=tk.WORD, state=tk.DISABLED)
+        self._auto_preview.pack(fill=tk.X, pady=(8, 0))
+        self._auto_warn_var = tk.StringVar()
         ttk.Label(
-            tab,
-            text="暂未开放（预留：定时自动抓取默认/指定通货比例并同步 Web「交易 → 自动」页）",
-            foreground="#64748b",
+            tab, textvariable=self._auto_warn_var, foreground="#d29922",
+            justify=tk.LEFT, wraplength=760,
         ).pack(anchor=tk.W, pady=(4, 0))
+        ttk.Label(
+            tab, text=AUTO_HELP, foreground="#64748b", justify=tk.LEFT, wraplength=760
+        ).pack(anchor=tk.W, pady=(6, 0))
 
     def _build_test_tab(self) -> None:
         """「比例测试」子页：A/B 双向抓取测试与挂单结果展示。"""
@@ -227,6 +291,9 @@ class TradeModule(ttk.Frame):
         self._hotkey_default_var.set(settings.market_scan.hotkey_default)
         self._hotkey_custom_var.set(settings.market_scan.hotkey_custom)
         self._custom_currency_var.set(settings.market_scan.custom_currency)
+        self._hotkey_auto_var.set(settings.market_scan.hotkey_auto)
+        self._auto_lo_var.set(str(settings.market_scan.auto_range_lo))
+        self._auto_hi_var.set(str(settings.market_scan.auto_range_hi))
 
     def sync_to(self, settings: Settings) -> None:
         """把控件值同步回配置。"""
@@ -246,6 +313,114 @@ class TradeModule(ttk.Frame):
         if hotkey_custom:
             settings.market_scan.hotkey_custom = hotkey_custom
         settings.market_scan.custom_currency = self._custom_currency_var.get().strip()
+        hotkey_auto = self._hotkey_auto_var.get().strip().lower()
+        if hotkey_auto:
+            settings.market_scan.hotkey_auto = hotkey_auto
+        try:
+            lo = float(self._auto_lo_var.get().strip())
+            hi = float(self._auto_hi_var.get().strip())
+        except ValueError:
+            return
+        if lo > 0 and hi > 0 and lo <= hi:
+            settings.market_scan.auto_range_lo = lo
+            settings.market_scan.auto_range_hi = hi
+
+    # ============================================================
+    # 自动套利抓取（工作线程执行，进度经 after 回主线程）
+    # ============================================================
+    def _auto_range(self) -> tuple[float, float]:
+        """读取并校验价值区间输入；非法时抛 ValueError（中文提示）。"""
+        try:
+            lo = float(self._auto_lo_var.get().strip())
+            hi = float(self._auto_hi_var.get().strip())
+        except ValueError:
+            raise ValueError("价值区间需为数字") from None
+        if lo <= 0 or hi <= 0 or lo > hi:
+            raise ValueError("价值区间无效（需 0 < 下限 ≤ 上限）")
+        return lo, hi
+
+    def _set_auto_preview(self, candidates: list[dict]) -> None:
+        """渲染候选通货预览清单（名称 + 神圣价值）。"""
+        self._auto_preview.config(state=tk.NORMAL)
+        self._auto_preview.delete("1.0", tk.END)
+        if candidates:
+            lines = [
+                f"{c['name_zh'] or ''} {c['name_en']}（{c['price_divine']:.2f} 神圣）"
+                for c in candidates
+            ]
+            self._auto_preview.insert(tk.END, "、".join(lines))
+        self._auto_preview.config(state=tk.DISABLED)
+
+    def load_auto_candidates(self) -> None:
+        """「加载候选」按钮：筛选候选通货并预览清单与规模（不抓取，主线程快速读库）。"""
+        try:
+            lo, hi = self._auto_range()
+            candidates = load_candidates(lo, hi)
+        except (ValueError, ArbitrageDataError) as exc:
+            self._auto_state_var.set(str(exc))
+            self._set_auto_preview([])
+            self._auto_warn_var.set("")
+            return
+        pair_count = len(auto_pairs([c["name_en"] for c in candidates]))
+        minutes = pair_count * _AUTO_SECONDS_PER_PAIR / 60
+        self._auto_state_var.set(
+            f"候选 {len(candidates)} 个通货，{pair_count} 对，预计耗时约 {minutes:.0f} 分钟"
+        )
+        self._set_auto_preview(candidates)
+        missing = candidates_missing_gold_costs(candidates)
+        self._auto_warn_var.set(
+            "缺少 Currency Exchange 值（金币口径计算缺失）：" + "、".join(missing)
+            if missing else ""
+        )
+
+    def trigger_auto(self) -> None:
+        """「自动」按钮 / 启动热键入口（主线程调用）：筛选候选后批量抓取。"""
+        if self._running:
+            return
+        try:
+            lo, hi = self._auto_range()
+        except ValueError as exc:
+            self._auto_state_var.set(str(exc))
+            return
+        self._running = True
+        self._auto_button.config(state=tk.DISABLED)
+        self._auto_state_var.set("加载候选中…")
+        threading.Thread(target=self._auto_worker, args=(lo, hi), daemon=True).start()
+
+    def _auto_worker(self, lo: float, hi: float) -> None:
+        """工作线程：候选筛选 + 批量抓取发布，进度/结果经 after 回主线程。"""
+        runner = ArbitrageScanRunner(self.scanner, logger=self._logger)
+
+        def progress(message: str) -> None:
+            self.after(0, lambda: self._auto_state_var.set(message))
+
+        try:
+            summary = runner.run(lo=lo, hi=hi, progress=progress)
+        except Exception as exc:
+            self.after(0, lambda: self._auto_done(None, str(exc)))
+            return
+        self.after(0, lambda: self._auto_done(summary, None))
+
+    def _auto_done(self, summary: dict | None, error: str | None) -> None:
+        """渲染自动套利抓取结论（主线程）。"""
+        if error is not None:
+            self._auto_state_var.set(f"失败:{error}")
+        elif summary is not None:
+            text = (
+                f"完成：{len(summary['candidates'])} 个候选、{summary['pairs']} 对，"
+                f"已同步 {summary['published']} 条比例到交易·自动页"
+            )
+            if summary["errors"]:
+                text += f"；{len(summary['errors'])} 对失败（详见日志）"
+            if summary.get("skipped"):
+                text += f"；{summary['skipped']} 对价差异常未发布（详见警告）"
+            if summary["published"] == 0 and not summary["errors"]:
+                text = "完成：未抓取到可用比例（详见日志）"
+            self._auto_state_var.set(text)
+            self._set_auto_preview(summary["candidates"])
+            self._auto_warn_var.set("\n".join(summary["warnings"]))
+        self._running = False
+        self._auto_button.config(state=tk.NORMAL)
 
     # ============================================================
     # 默认/指定批量抓取（工作线程执行，进度经 after 回主线程）
@@ -323,6 +498,8 @@ class TradeModule(ttk.Frame):
             )
             if summary["errors"]:
                 text += f"；{len(summary['errors'])} 对失败（详见日志）"
+            if summary.get("skipped"):
+                text += f"；{summary['skipped']} 对价差异常未发布（详见日志）"
             if summary["published"] == 0 and not summary["errors"]:
                 text = "完成：未抓取到可用比例（详见日志）"
             state_var.set(text)

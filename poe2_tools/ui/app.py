@@ -441,6 +441,11 @@ class Poe2ToolsApp:
             "market_scan_custom", market_custom_key, self._market_scan_custom_trigger,
             self._function_guard(market_custom_key),
         )
+        market_auto_key = s.market_scan.hotkey_auto
+        self.hotkeys.register_when_poe_active(
+            "market_scan_auto", market_auto_key, self._market_scan_auto_trigger,
+            self._function_guard(market_auto_key),
+        )
         self.hotkeys.register_when_poe_active(
             "cal_first", CALIBRATE_KEY_FIRST, self.bag.calibrate_first,
             self._function_guard(CALIBRATE_KEY_FIRST),
@@ -660,6 +665,10 @@ class Poe2ToolsApp:
     def _market_scan_custom_trigger(self) -> None:
         """指定通货批量抓取热键回调（键盘线程）：转主线程触发。"""
         self.root.after(0, self.trade_module.trigger_custom)
+
+    def _market_scan_auto_trigger(self) -> None:
+        """自动套利批量抓取热键回调（键盘线程）：转主线程触发。"""
+        self.root.after(0, self.trade_module.trigger_auto)
 
     # ============================================================
     # 状态轮询

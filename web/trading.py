@@ -11,9 +11,14 @@
 - 因此 1 个通货 X ≡ VE(X) 金币，买边的有效汇率需把金币费折算成支付方通货。
 """
 
+import math
+
 BASE_CURRENCIES = ["exalted", "chaos", "divine"]
 
 BASE_LABELS = {"exalted": "崇高石", "chaos": "混沌石", "divine": "神圣石"}
+
+# 三种默认通货的游戏内英文全名（双名展示用）
+BASE_NAMES_EN = {"exalted": "Exalted Orb", "chaos": "Chaos Orb", "divine": "Divine Orb"}
 
 ITEM_PREFIX = "item:"
 
@@ -24,6 +29,13 @@ def item_unit(name):
 
 def is_item_unit(unit):
     return unit.startswith(ITEM_PREFIX)
+
+
+def canon_item_name(name):
+    """物品名归一化（小写、仅保留字母数字）：抹平信息库 wiki 名与游戏内
+    搜索名的标点差异（如 Perfect Jeweller's Orb ↔ Perfect Jewellers Orb），
+    供金币消耗（Currency Exchange 值）按名匹配时使用。"""
+    return "".join(ch for ch in name.lower() if ch.isalnum())
 
 
 def unit_label(unit):
@@ -183,6 +195,7 @@ def cycle_plan(cycle, gold_values=None):
                 gold_known = False
         steps.append({"from_unit": e["from_unit"], "to_unit": e["to_unit"],
                       "side": e.get("side", "sell"), "rate": r,
+                      "amount_from": e["amount_from"], "amount_to": e["amount_to"],
                       "pay": amount, "receive": received, "gold_fee": fee})
         amount = received
     profit_units = amount - 1.0
@@ -223,3 +236,284 @@ def best_arbitrage(rates, gold_values=None):
                 best = plan
                 best["path"] = rot
     return best
+
+
+# ---------- 自动套利：候选筛选与金币获取方案 ----------
+
+# 候选通货默认价值区间（神圣计）
+DEFAULT_CANDIDATE_LO = 0.5
+DEFAULT_CANDIDATE_HI = 20.0
+
+# 候选集合排除的 slug：三种默认通货自身与金币（套利对象是非默认通货）
+EXCLUDED_CANDIDATE_SLUGS = frozenset({"divine", "exalted", "chaos", "gold"})
+
+
+def filter_currency_candidates(rows, chaos_per_divine, lo=DEFAULT_CANDIDATE_LO,
+                               hi=DEFAULT_CANDIDATE_HI):
+    """从通货模块快照行中筛选价值在 [lo, hi] 神圣之间的候选通货，按神圣价值降序。
+
+    price_divine 缺失时用 price_chaos / chaos_per_divine 补齐，仍缺失则跳过；
+    排除三种默认通货与金币自身；无游戏内英文名（无法在市场搜索）的跳过。
+    返回 [{"slug", "name_en", "name_zh", "price_divine", "price_chaos"}]。
+    """
+    candidates = []
+    for row in rows:
+        slug = row.get("slug")
+        if slug in EXCLUDED_CANDIDATE_SLUGS:
+            continue
+        price_divine = row.get("price_divine")
+        price_chaos = row.get("price_chaos")
+        if price_divine is None and price_chaos and chaos_per_divine:
+            price_divine = price_chaos / chaos_per_divine
+        if price_divine is None or not (lo <= price_divine <= hi):
+            continue
+        name_en = row.get("name_en")
+        if not name_en and row.get("wiki_slug"):
+            name_en = row["wiki_slug"].replace("_", " ")
+        if not name_en:
+            continue
+        if price_chaos is None and chaos_per_divine:
+            price_chaos = price_divine * chaos_per_divine
+        candidates.append({
+            "slug": slug,
+            "name_en": name_en,
+            "name_zh": row.get("name_zh"),
+            "price_divine": price_divine,
+            "price_chaos": price_chaos,
+        })
+    candidates.sort(key=lambda c: c["price_divine"], reverse=True)
+    return candidates
+
+
+def gold_unit_cost(path, gold_values):
+    """沿兑换路径换算「消耗金币口径」下 1 单位源通货的执行结果。
+
+    执行模型与 cycle_plan 一致：从 1 单位源通货出发，每步按原始市场比例兑换，
+    买边金币费 = receive × VE(to) 以金币实付。返回 (final, total_gold_fee)，
+    任一买边 VE 缺失时 total_gold_fee 为 None。
+    """
+    amount = 1.0
+    total_gold = 0.0
+    gold_known = True
+    for e in path:
+        received = amount * edge_rate(e)
+        if e.get("side") == "buy":
+            ve = (gold_values or {}).get(e["to_unit"])
+            if ve and ve > 0:
+                total_gold += received * ve
+            else:
+                gold_known = False
+        amount = received
+    return amount, (total_gold if gold_known else None)
+
+
+def best_gold_plans(rates, gold_values, targets=BASE_CURRENCIES):
+    """每种目标默认通货的最佳金币获取方案（消耗金币兑换通货）。
+
+    遍历汇率图中全部可用源单位（三默认中其余两个 + 所有 item:X），
+    各自取 best_conversion 最优路径，再按 gold_unit_cost 换算金币口径：
+    gold_per_unit = 每获得 1 单位目标通货消耗的金币（金币费未知时为 None）。
+    best 为 gold_per_unit 最小者（None 排最后）。
+    返回 [{"target", "best": {"source", "path", "final_amount", "gold_fee",
+    "gold_per_unit"} | None, "alternatives": [...]}]，按 targets 顺序。
+    """
+    units = sorted({u for r in rates for u in (r["from_unit"], r["to_unit"])})
+    plans = []
+    for target in targets:
+        options = []
+        for src in units:
+            if src == target:
+                continue
+            rate, path = best_conversion(rates, src, target, gold_values)
+            if rate is None or not path:
+                continue
+            final, gold_fee = gold_unit_cost(path, gold_values)
+            options.append({
+                "source": src,
+                "path": path,
+                "final_amount": final,
+                "gold_fee": gold_fee,
+                "gold_per_unit": (gold_fee / final) if gold_fee is not None and final > 0 else None,
+            })
+        options.sort(key=lambda o: (o["gold_per_unit"] is None, o["gold_per_unit"] or 0))
+        plans.append({
+            "target": target,
+            "best": options[0] if options else None,
+            "alternatives": options[1:],
+        })
+    return plans
+
+
+def verify_arbitrage_plan(rates, gold_values, plan, rel_tol=1e-9):
+    """double check：沿 plan 的 path 逐边在原始汇率记录中定位同方向同侧记录，
+    用原始比例独立重算终值与金币费（不复用 cycle_plan 内部计算），与方案值比对。
+
+    返回 {"ok", "expected_final", "actual_final", "expected_gold", "actual_gold",
+    "discrepancies"}；expected_* 为独立重算值，actual_* 为方案中的值；
+    容差为 rel_tol 相对误差。
+    """
+    discrepancies = []
+    path = plan.get("path") or []
+    if not path:
+        return {"ok": False, "expected_final": None, "actual_final": plan.get("final_amount"),
+                "expected_gold": None, "actual_gold": plan.get("total_gold_fee"),
+                "discrepancies": ["方案缺少兑换路径"]}
+    amount = 1.0
+    total_gold = 0.0
+    gold_known = True
+    for i, e in enumerate(path, 1):
+        matches = [r for r in rates
+                   if r["from_unit"] == e["from_unit"] and r["to_unit"] == e["to_unit"]
+                   and r.get("side") == e.get("side")]
+        if not matches:
+            discrepancies.append(
+                f"步骤 {i}：原始汇率中找不到 {e['from_unit']} → {e['to_unit']}（{e.get('side')}）")
+            break
+        entry = max(matches, key=edge_rate)
+        r = edge_rate(entry)
+        if not math.isclose(r, edge_rate(e), rel_tol=rel_tol):
+            discrepancies.append(
+                f"步骤 {i}：路径汇率 1:{edge_rate(e):.6g} 与原始记录 1:{r:.6g} 不一致")
+        received = amount * r
+        if entry.get("side") == "buy":
+            ve = (gold_values or {}).get(entry["to_unit"])
+            if ve and ve > 0:
+                total_gold += received * ve
+            else:
+                gold_known = False
+        amount = received
+    expected_gold = total_gold if gold_known else None
+    actual_final = plan.get("final_amount")
+    actual_gold = plan.get("total_gold_fee")
+    if not math.isclose(amount, actual_final, rel_tol=rel_tol):
+        discrepancies.append(
+            f"终值不一致：重算 {amount:.6g} ≠ 方案 {actual_final:.6g}")
+    if (expected_gold is None) != (actual_gold is None):
+        discrepancies.append(
+            f"金币费已知性不一致：重算 {expected_gold}，方案 {actual_gold}")
+    elif expected_gold is not None and not math.isclose(
+            expected_gold, actual_gold, rel_tol=rel_tol):
+        discrepancies.append(
+            f"金币费不一致：重算 {expected_gold:.6g} ≠ 方案 {actual_gold:.6g}")
+    return {"ok": not discrepancies,
+            "expected_final": amount, "actual_final": actual_final,
+            "expected_gold": expected_gold, "actual_gold": actual_gold,
+            "discrepancies": discrepancies}
+
+
+# ---------- 套利方案持仓优化（神圣口径） ----------
+
+# 可作为套利本金的默认通货（其余起点的机会不参与持仓方案）
+PRINCIPAL_UNITS = ("divine", "chaos", "exalted")
+
+def arbitrage_opportunities(rates, gold_values):
+    """枚举全部盈利环（原始汇率口径 rate>1，金币费是正常消耗）× 全部起点旋转，
+    统一折算神圣口径的金币效率（金币转换通货的最优比例，标准以神圣石为准）。
+
+    divine_value 用 best_conversion(rates, s, "divine") 原始汇率（gold_values=None），
+    s=="divine" 时为 1；起点无法折算神圣时该条目跳过；total_gold_fee 为 None
+    （VE 缺失）的旋转跳过；每环无金币费时 divine_per_10k_gold 为 None（排最后）。
+    返回 [{start_unit, path, rate, profit_units, total_gold_fee, divine_value,
+    profit_divine_per_loop, divine_per_10k_gold}]，按 divine_per_10k_gold 降序。
+    """
+    opportunities = []
+    for c in find_profitable_cycles(rates):
+        path = c["path"]
+        for i in range(len(path)):
+            rot = path[i:] + path[:i]
+            plan = cycle_plan({"path": rot}, gold_values)
+            fee = plan["total_gold_fee"]
+            if fee is None:
+                continue
+            start = plan["start_unit"]
+            if start == "divine":
+                divine_value = 1.0
+            else:
+                divine_value, _ = best_conversion(rates, start, "divine")
+                if divine_value is None:
+                    continue
+            profit_divine = plan["profit_units"] * divine_value
+            per_10k = (profit_divine / fee * 10000) if fee > 0 else None
+            opportunities.append({
+                "start_unit": start,
+                "path": rot,
+                "rate": plan["rate"],
+                "profit_units": plan["profit_units"],
+                "total_gold_fee": fee,
+                "divine_value": divine_value,
+                "profit_divine_per_loop": profit_divine,
+                "divine_per_10k_gold": per_10k,
+            })
+    opportunities.sort(key=lambda o: (o["divine_per_10k_gold"] is None,
+                                      -(o["divine_per_10k_gold"] or 0)))
+    return opportunities
+
+
+def best_arbitrage_plan(rates, gold_values, holdings):
+    """持仓口径最优套利方案：消耗金币沿价差兑换环互换来赚取本金通货。
+
+    执行模型：每环投入 batch 个起点通货，按原始市场比例兑换一圈收回
+    batch×rate 个，消耗金币 fee = fee_per_unit × batch，净得
+    profit_units × batch；同一本金可重复循环，金币预算决定总环数。
+    总净得 = profit_units × gold / fee_per_unit（与每环规模无关），因此
+    按金币效率（每金币净得折神圣）选环即总收益最大——金币通货转换率最高。
+
+    batch = min(起点持仓, gold / fee_per_unit)：预算跑不满整仓一环时缩减
+    每环本金规模，保证 total_gold_fee = fee_per_unit × batch × loops ≤ gold
+    （消耗金币永不超预算，方案可执行）。final_amount = 起点持仓 + 总净得。
+
+    起点限 PRINCIPAL_UNITS 且对应持仓 > 0、金币预算 > 0、fee_per_unit > 0；
+    无满足条件的机会时返回 None。
+    check 用未缩放（1 本金口径）值调 verify_arbitrage_plan 独立复核。
+    """
+    gold = holdings.get("gold") or 0
+    if gold <= 0:
+        return None
+    best = None
+    best_profit_divine = None
+    for opp in arbitrage_opportunities(rates, gold_values):
+        start = opp["start_unit"]
+        if start not in PRINCIPAL_UNITS:
+            continue
+        principal = holdings.get(start) or 0
+        if principal <= 0:
+            continue
+        fee_per_unit = opp["total_gold_fee"]
+        if fee_per_unit is None or fee_per_unit <= 0:
+            continue
+        batch = min(principal, gold / fee_per_unit)
+        loops = gold / (fee_per_unit * batch)
+        profit_total = opp["profit_units"] * batch * loops
+        total_gold = fee_per_unit * batch * loops
+        final_amount = principal + profit_total
+        final_divine = final_amount * opp["divine_value"]
+        profit_divine_total = profit_total * opp["divine_value"]
+        if best_profit_divine is None or profit_divine_total > best_profit_divine:
+            best_profit_divine = profit_divine_total
+            best = (opp, principal, batch, loops, profit_total, total_gold,
+                    final_amount, final_divine)
+    if best is None:
+        return None
+    (opp, principal, batch, loops, profit_total, total_gold,
+     final_amount, final_divine) = best
+    plan = cycle_plan({"path": opp["path"]}, gold_values)
+    steps = [{
+        **s,
+        "pay": s["pay"] * batch,
+        "receive": s["receive"] * batch,
+        "gold_fee": (s["gold_fee"] * batch if s["gold_fee"] is not None else None),
+    } for s in plan["steps"]]
+    check = verify_arbitrage_plan(rates, gold_values, {
+        "path": opp["path"],
+        "final_amount": plan["final_amount"],
+        "total_gold_fee": plan["total_gold_fee"],
+    })
+    return {"start_unit": opp["start_unit"], "principal": principal,
+            "batch": batch, "loops": loops, "gold_budget": gold,
+            "profit_units": opp["profit_units"], "profit_total": profit_total,
+            "final_amount": final_amount, "final_divine": final_divine,
+            "steps": steps, "path": opp["path"], "rate": opp["rate"],
+            "total_gold_fee": total_gold,
+            "divine_value": opp["divine_value"],
+            "divine_per_10k_gold": opp["divine_per_10k_gold"],
+            "check": check}

@@ -8,6 +8,8 @@ import pytest
 
 from poe2_tools.modules.market.exchange import (
     ExchangeScanRunner,
+    auto_pairs,
+    check_scan_consistency,
     custom_pairs,
     default_pairs,
     parse_ratio,
@@ -190,10 +192,11 @@ def _rate(frm: str, to: str, amount_to: float) -> dict:
 
 
 def test_replace_auto_trade_rates_keeps_latest(tmp_path) -> None:
-    """同方向自动记录整体替换（只保留最近一次）；手动记录不受影响。"""
+    """整批替换：同类别旧自动记录全部清除只留本批；手动记录不受影响。"""
     path = tmp_path / "eco.db"
     db.init_db(path)
-    db.replace_auto_trade_rates([_rate("chaos", "divine", 150.0)], db_path=path)
+    db.replace_auto_trade_rates([_rate("chaos", "divine", 150.0),
+                                 _rate("exalted", "chaos", 65.0)], db_path=path)
     db.replace_auto_trade_rates([_rate("chaos", "divine", 155.0)], db_path=path)
 
     rows = [r for r in db.list_trade_rates(db_path=path)
@@ -201,6 +204,9 @@ def test_replace_auto_trade_rates_keeps_latest(tmp_path) -> None:
     assert len(rows) == 1
     assert rows[0]["amount_to"] == 155.0
     assert rows[0]["source"] == "auto"
+    # 上一批中本批未覆盖的方向一并清除（整批只留最近一次）
+    assert [r for r in db.list_trade_rates(db_path=path)
+            if r["from_unit"] == "exalted"] == []
 
     # 手动录入同方向：不被自动替换删除；latest 取 id 最大者（手动更新则手动生效）
     db.add_trade_rate("chaos", "divine", 1.0, 160.0, side="buy", db_path=path)
@@ -224,7 +230,7 @@ def test_add_trade_rate_default_source_manual(tmp_path) -> None:
 
 
 def test_replace_auto_trade_rates_category_isolated(tmp_path) -> None:
-    """类别隔离：替换只清同类别同方向旧记录；latest/list 可按类别过滤。"""
+    """类别隔离：整批替换只清同类别旧自动记录；latest/list 可按类别过滤。"""
     path = tmp_path / "eco.db"
     db.init_db(path)
     db.replace_auto_trade_rates([_rate("chaos", "divine", 150.0)], db_path=path)
@@ -269,3 +275,109 @@ def test_init_db_backfills_category(tmp_path) -> None:
     by_from = {r["from_unit"]: r for r in db.list_trade_rates(db_path=path)}
     assert by_from["chaos"]["category"] == "default"
     assert by_from["item:X"]["category"] == "custom"
+
+
+# ============================================================
+# 自动套利：通货对与抓取一致性复核
+# ============================================================
+def test_auto_pairs_multiple_dedup_and_skip_default() -> None:
+    """多个通货 × 三默认；重名/空名/与默认通货同名者跳过。"""
+    pairs = auto_pairs([
+        "Orb of Annulment", "Orb of Chance",
+        "Orb of Annulment",  # 重复
+        "Divine Orb",        # 默认通货自身
+        "  ",                # 空名
+    ])
+    assert len(pairs) == 6  # 2 个有效通货 × 3 默认
+    units = {(p[0], p[2]) for p in pairs}
+    assert ("item:Orb of Annulment", "exalted") in units
+    assert ("item:Orb of Annulment", "chaos") in units
+    assert ("item:Orb of Annulment", "divine") in units
+    assert ("item:Orb of Chance", "divine") in units
+    assert all(p[1] in ("Orb of Annulment", "Orb of Chance") for p in pairs)
+
+
+def test_auto_pairs_empty() -> None:
+    assert auto_pairs([]) == []
+
+
+def test_check_scan_consistency_normal() -> None:
+    """双向买价乘积 < 1 且隐含价格接近（正常价差）：无警告。"""
+    result = {
+        "b_to_a": [{"rank": 1, "ratio": "1:155", "stock": 120}],
+        "a_to_b": [{"rank": 1, "ratio": "150:1", "stock": 450}],
+    }
+    assert check_scan_consistency(result, "A ↔ B") == ([], [])
+
+
+def test_check_scan_consistency_abnormal() -> None:
+    """乘积 ≥ 1（自由套利窗口或小幅识别偏差）：提示级警告，不阻断。"""
+    result = {
+        "b_to_a": [{"rank": 1, "ratio": "1:100", "stock": None}],
+        "a_to_b": [{"rank": 1, "ratio": "200:1", "stock": None}],
+    }
+    warnings, criticals = check_scan_consistency(result, "甲 ↔ 乙")
+    assert len(warnings) == 1
+    assert "甲 ↔ 乙" in warnings[0] and "≥ 1" in warnings[0]
+    assert criticals == []
+
+
+def test_check_scan_consistency_spread_critical() -> None:
+    """双向隐含价格价差超上限（2470:1 被误识别为 1:1）：严重异常，应跳过发布。"""
+    result = {
+        "b_to_a": [{"rank": 1, "ratio": "1:1", "stock": 5}],     # OCR 误识别
+        "a_to_b": [{"rank": 1, "ratio": "2470:1", "stock": 12}],
+    }
+    warnings, criticals = check_scan_consistency(result, "崇高 ↔ 完美混沌")
+    assert warnings == []
+    assert len(criticals) == 1
+    assert "价差" in criticals[0] and "不发布" in criticals[0]
+
+
+def test_check_scan_consistency_missing_direction() -> None:
+    """某方向无挂单或比例无法解析时不做判断。"""
+    assert check_scan_consistency({"b_to_a": [], "a_to_b": [{"ratio": "158:1"}]}) == ([], [])
+    bad = {"b_to_a": [{"ratio": "坏"}], "a_to_b": [{"ratio": "158:1"}]}
+    assert check_scan_consistency(bad) == ([], [])
+
+
+def test_runner_collects_consistency_warnings() -> None:
+    """提示级复核异常记入 summary["warnings"] 并写日志，不影响发布。"""
+    scanner = FakeScanner({
+        ("Exalted Orb", "Chaos Orb"): {
+            "b_to_a": [{"rank": 1, "ratio": "1:100", "stock": 5}],
+            "a_to_b": [{"rank": 1, "ratio": "200:1", "stock": 3}],
+        },
+    })
+    logs: list[tuple[str, str]] = []
+    runner = ExchangeScanRunner(
+        scanner,
+        logger=lambda msg, level: logs.append((msg, level)),
+        publisher=lambda rates, category: len(rates),
+    )
+    summary = runner.run(default_pairs())
+    assert len(summary["warnings"]) == 1
+    assert "双向买价乘积" in summary["warnings"][0]
+    assert summary["published"] == 2  # 提示级警告不阻断发布
+    assert summary["skipped"] == 0
+    assert any(level == "WARN" and "复核" in msg for msg, level in logs)
+
+
+def test_runner_skips_spread_anomalous_pair() -> None:
+    """严重价差异常（必有一方向误识别）：该对比例跳过不发布。"""
+    scanner = FakeScanner({
+        ("Exalted Orb", "Chaos Orb"): {
+            "b_to_a": [{"rank": 1, "ratio": "1:1", "stock": 5}],     # 误识别
+            "a_to_b": [{"rank": 1, "ratio": "2470:1", "stock": 3}],
+        },
+    })
+    runner = ExchangeScanRunner(
+        scanner,
+        logger=lambda msg, level: None,
+        publisher=lambda rates, category: len(rates),
+    )
+    summary = runner.run(default_pairs())
+    assert summary["skipped"] == 1
+    assert summary["published"] == 0  # 严重异常对不发布
+    assert len(summary["warnings"]) == 1
+    assert "不发布" in summary["warnings"][0]

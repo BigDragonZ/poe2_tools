@@ -195,18 +195,20 @@ def main():
               str(page.locator(".sidebar .side-item.sub").all_inner_texts()))
         check("默认进入「交易 · 默认」页",
               page.locator(".main h2").inner_text() == "交易 · 默认")
-        check("交易页无手动录入入口（仅 VE 三个费率输入框 + 套利起投数量输入框）",
+        check("交易页无手动录入入口（仅 VE 三个费率输入框 + 套利持仓三个输入框）",
               page.locator(".main button", has_text="录入").count() == 0 and
-              page.locator(".main input[type='number']").count() == 4)
-        # 最佳套利方案面板：起投输入、步骤表、净收益结论
+              page.locator(".main input[type='number']").count() == 6)
+        # 最佳套利方案面板（持仓优化版，位于页面顶端）：持仓输入、步骤表、最终获取结论
         arb_panel = page.locator(".panel", has_text="最佳套利方案")
         check("最佳套利方案面板存在", arb_panel.count() == 1)
+        check("套利面板位于页面顶端",
+              page.locator(".main .panel").first.inner_text().find("最佳套利方案") == 0
+              or "最佳套利方案" in page.locator(".main .panel").first.inner_text())
         panel_text = arb_panel.inner_text()
-        check("套利面板含步骤表与合计",
-              "市场买入" in panel_text and "合计" in panel_text and "金币费" in panel_text,
-              panel_text[:80])
-        check("套利面板给出净收益结论",
-              "净收益" in panel_text or "差价收益" in panel_text, panel_text[:120])
+        check("套利面板含持仓输入与双名",
+              "当前持仓" in panel_text and "Divine Orb" in panel_text, panel_text[:80])
+        check("套利面板给出结论（最终获取数量或原因提示）",
+              "最终约" in panel_text or "暂无可执行方案" in panel_text, panel_text[:120])
         page.screenshot(path=str(SHOTS_DIR / "06_trade_default.png"), full_page=True)
         page.locator(".sidebar .side-item.sub", has_text="指定").click()
         page.wait_for_timeout(500)

@@ -304,7 +304,7 @@ function SeasonPanel({ onCreated }) {
 const TRADE_PAGES = {
   default: {label: "默认", source: "游玩工具「交易 · 默认通货」抓取同步：崇高石/混沌石/神圣石两两市场比例"},
   custom: {label: "指定", source: "游玩工具「交易 · 指定」抓取同步：指定通货与三种默认通货的市场比例"},
-  auto: {label: "自动", source: "游玩工具「交易 · 自动」定时抓取同步（该功能暂未开放）"},
+  auto: {label: "自动", source: "游玩工具「交易 · 自动」套利抓取同步：通货快照中 0.5~20 神圣价值区间的候选通货 × 三种默认通货的市场比例"},
 };
 
 const BASE_CURS = [
@@ -316,6 +316,13 @@ const BASE_CURS = [
 function unitLabel(u) {
   const b = BASE_CURS.find(c => c.unit === u);
   return b ? b.label : (u.indexOf("item:") === 0 ? u.slice(5) : u);
+}
+
+// 单位双名（中文 + 英文，方便游戏内操作对照）；无中文名只显示英文
+function unitDualLabel(u, labels) {
+  const l = labels && labels[u];
+  if (l) return l.zh ? l.zh + " " + l.en : l.en;
+  return unitLabel(u);
 }
 
 // 单位图标（有本地图标则显示，否则只显示名称）
@@ -426,9 +433,9 @@ function RatesTable({ state }) {
               {r.side === "buy" ? "买" : "卖"}
             </td>
             <td>
-              <UnitIcon unit={r.from_unit} icons={state.unit_icons}/> {unitLabel(r.from_unit)}
+              <UnitIcon unit={r.from_unit} icons={state.unit_icons}/> {unitDualLabel(r.from_unit, state.unit_labels)}
               <span className="swap">→</span>
-              <UnitIcon unit={r.to_unit} icons={state.unit_icons}/> {unitLabel(r.to_unit)}
+              <UnitIcon unit={r.to_unit} icons={state.unit_icons}/> {unitDualLabel(r.to_unit, state.unit_labels)}
             </td>
             <td>{fmtNum(r.amount_from)} : {fmtNum(r.amount_to)}</td>
             <td>1 {unitLabel(r.from_unit)} ≈ {fmtNum(r.amount_to / r.amount_from, 3)} {unitLabel(r.to_unit)}</td>
@@ -454,62 +461,171 @@ function MarketRatePanel({ state, reload }) {
   );
 }
 
-// 最佳套利方案：基于买卖差价的最优套换环（买边已折算金币费），可输入起投数量换算总量
-function ArbitragePanel({ state }) {
-  const [invest, setInvest] = useState("1");
-  const arb = state.arbitrage;
-  const scale = Number(invest) > 0 ? Number(invest) : 1;
+// 最佳套利方案（持仓优化版）：填入当前神圣/混沌/崇高/金币持仓，按金币效率
+// （每万金币净得神圣当量）选最优环；每环本金受持仓与金币预算双重约束，
+// 消耗金币永不超预算，给出执行步骤与最终获取数量（单位双名显示）
+function ArbitragePanel({ state, reload }) {
+  const [form, setForm] = useState(null);
+  const [msg, setMsg] = useState("");
+  useEffect(() => {
+    const h = state.holdings || {};
+    setForm({
+      divine: h.divine ? String(h.divine) : "",
+      chaos: h.chaos ? String(h.chaos) : "",
+      exalted: h.exalted ? String(h.exalted) : "",
+      gold: h.gold ? String(h.gold) : "",
+    });
+  }, [state.holdings]);
+  if (!form) return null;
+  const ul = u => unitDualLabel(u, state.unit_labels);
+  const plan = state.arb_plan;
+  const save = () => {
+    const body = {};
+    ["divine", "chaos", "exalted", "gold"].forEach(k => { body[k] = Number(form[k]) || null; });
+    api("/api/trade/holdings", {method: "PUT", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body)})
+      .then(() => { setMsg("已保存"); reload(); setTimeout(() => setMsg(""), 1500); })
+      .catch(e => setMsg("保存失败：" + e.message));
+  };
+  const opps = (state.opportunities || []).slice(0, 3);
+  const holdings = [
+    {key: "divine", label: "神圣石 Divine Orb"},
+    {key: "chaos", label: "混沌石 Chaos Orb"},
+    {key: "exalted", label: "崇高石 Exalted Orb"},
+    {key: "gold", label: "金币 Gold"},
+  ];
   return (
     <div className="panel">
       <div className="panel-title" style={{cursor: "default"}}>
-        最佳套利方案（消耗金币套取买卖差价）
+        最佳套利方案（消耗金币沿价差兑换，以神圣石为基准）
       </div>
-      {!arb && <div style={{color: "#777", marginTop: 8}}>同步至少一对双向比例后自动计算</div>}
-      {arb &&
+      <div className="row" style={{marginTop: 8}}>
+        <span style={{color: "#999"}}>当前持仓：</span>
+        {holdings.map(h => (
+          <span key={h.key}>{h.label}
+            <input type="number" style={{width: 90, margin: "0 4px"}} min="0" step="any"
+              value={form[h.key]}
+              onChange={e => setForm({...form, [h.key]: e.target.value})}/>
+          </span>
+        ))}
+        <button onClick={save}>保存</button>
+        <span className="status-line">{msg}</span>
+      </div>
+      {!plan &&
+        <div style={{color: "#777", marginTop: 8}}>
+          暂无可执行方案：需存在盈利兑换环，且神圣/混沌/崇高石任一持仓大于 0、金币预算大于 0
+        </div>}
+      {plan &&
         <div style={{marginTop: 8}}>
           <div className="row" style={{marginTop: 0}}>
-            <span>投入</span>
-            <input type="number" min="0" step="any" style={{width: 90}} value={invest}
-                   onChange={e => setInvest(e.target.value)}/>
-            <span><UnitIcon unit={arb.start_unit} icons={state.unit_icons}/> {unitLabel(arb.start_unit)}
-              起投，沿环兑换一圈回到 {unitLabel(arb.start_unit)}</span>
-            {arb.profitable
-              ? <b className="pos">可套利：每循环净得 +{fmtNum((arb.rate - 1) * 100, 2)}% {unitLabel(arb.start_unit)}（金币费为正常消耗）</b>
-              : <b className="neg">差价收益 {fmtNum((arb.rate - 1) * 100, 2)}%（无正收益环，暂不套利）</b>}
+            <span>每环投入 <b>{fmtNum(plan.batch, 2)}</b> {ul(plan.start_unit)}
+              {plan.batch < plan.principal &&
+                <span style={{color: "#777", fontSize: 11}}>（本金 {fmtNum(plan.principal, 2)}，受金币预算缩减）</span>}，</span>
+            <span>每环净得 <b className="pos">{fmtNum(plan.profit_units * plan.batch, 4)}</b> {ul(plan.start_unit)}
+              （折神圣 {fmtNum(plan.profit_units * plan.batch * plan.divine_value, 4)}），</span>
+            <span>每 1 万金币净得 {plan.divine_per_10k_gold !== null && plan.divine_per_10k_gold !== undefined
+              ? fmtNum(plan.divine_per_10k_gold, 4) : "-"} 神圣当量</span>
+          </div>
+          <div className="row" style={{marginTop: 4}}>
+            <span>金币预算 <b>{fmtNum(plan.gold_budget, 0)}</b> 可跑 <b>{fmtNum(plan.loops, 1)}</b> 环，</span>
+            <span>全程消耗金币 <b>{fmtNum(plan.total_gold_fee, 0)}</b>
+              <span style={{color: "#777", fontSize: 11}}>（不超预算）</span>，</span>
+            <span>累计净得 <b className="pos">{fmtNum(plan.profit_total, 2)}</b> {ul(plan.start_unit)} →</span>
+            <b className="pos">最终约 {fmtNum(plan.final_amount, 2)} {ul(plan.start_unit)}
+              （折神圣 {fmtNum(plan.final_divine, 2)}）</b>
           </div>
           <table className="eco" style={{marginTop: 8}}>
-            <thead><tr><th>步骤</th><th>操作</th><th>付出</th><th>获得</th><th>金币费</th></tr></thead>
+            <thead><tr><th>步骤</th><th>付出</th><th>获得</th><th>市场比例</th><th>金币费</th></tr></thead>
             <tbody>
-              {arb.steps.map((s, i) => (
+              {plan.steps.map((s, i) => (
                 <tr key={i}>
                   <td>{i + 1}</td>
-                  <td style={{color: s.side === "buy" ? "#c8aa6e" : "#999"}}>
-                    {s.side === "buy" ? "市场买入" : "卖出"}</td>
                   <td>
-                    <UnitIcon unit={s.from_unit} icons={state.unit_icons}/> {fmtNum(s.pay * scale, 4)} {unitLabel(s.from_unit)}
+                    <UnitIcon unit={s.from_unit} icons={state.unit_icons}/> {fmtNum(s.pay, 4)} {ul(s.from_unit)}
                   </td>
                   <td>
-                    <UnitIcon unit={s.to_unit} icons={state.unit_icons}/> {fmtNum(s.receive * scale, 4)} {unitLabel(s.to_unit)}
-                    <span style={{color: "#777", fontSize: 11}}>（1:{fmtNum(s.rate, 3)}）</span>
+                    <UnitIcon unit={s.to_unit} icons={state.unit_icons}/> {fmtNum(s.receive, 4)} {ul(s.to_unit)}
+                  </td>
+                  <td>{fmtNum(s.amount_from, 4)} : {fmtNum(s.amount_to, 4)}
+                    {s.side === "buy" &&
+                      <span style={{color: "#c8aa6e", fontSize: 11}} title="市场买入，需付金币费"> [买]</span>}
                   </td>
                   <td>{s.gold_fee === null || s.gold_fee === undefined
-                        ? "-" : fmtNum(s.gold_fee * scale, 0) + " 金币"}</td>
+                        ? "-" : fmtNum(s.gold_fee, 0) + " 金币"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
           <div style={{marginTop: 6, color: "#999"}}>
-            合计：投入 {fmtNum(scale, 4)} {unitLabel(arb.start_unit)} → 收回 {fmtNum(arb.final_amount * scale, 4)} {unitLabel(arb.start_unit)}
-            （<b className={arb.profit_units >= 0 ? "pos" : "neg"}>
-              净{arb.profit_units >= 0 ? "得" : "亏"} {fmtNum(Math.abs(arb.profit_units * scale), 4)} {unitLabel(arb.start_unit)}</b>）
-            {arb.total_gold_fee !== null && arb.total_gold_fee !== undefined
-              ? "，消耗金币 " + fmtNum(arb.total_gold_fee * scale, 0)
-              : "，金币费未知（缺少 Currency Exchange 值）"}
-            {arb.units_per_10k_gold !== null && arb.units_per_10k_gold !== undefined &&
-              <span>，金币效率：每 1 万金币净得 {fmtNum(arb.units_per_10k_gold, 4)} {unitLabel(arb.start_unit)}</span>}
-            ；实际可执行规模受市场挂单深度限制，建议小额多次
+            以上为每环规模（金币费为每环消耗 × 环数 = 全程总消耗）；实际可执行规模受市场挂单深度限制，建议小额多次
           </div>
+          {plan.check &&
+            <div style={{marginTop: 4, fontSize: 12}}>
+              {plan.check.ok
+                ? <span className="pos">复核一致：已按原始比例独立重算终值与金币费，与方案相符</span>
+                : <span className="neg">复核不一致：{plan.check.discrepancies.join("；")}</span>}
+            </div>}
         </div>}
+      {opps.length > 0 &&
+        <table className="eco" style={{marginTop: 8}}>
+          <thead><tr><th>备选方案</th><th>起点</th><th>每环收益率</th><th>每 1 万金币净得（神圣当量）</th></tr></thead>
+          <tbody>
+            {opps.map((o, i) => (
+              <tr key={i}>
+                <td>{i + 1}</td>
+                <td><UnitIcon unit={o.start_unit} icons={state.unit_icons}/> {ul(o.start_unit)}</td>
+                <td>+{fmtNum((o.rate - 1) * 100, 2)}%</td>
+                <td>{o.divine_per_10k_gold !== null && o.divine_per_10k_gold !== undefined
+                      ? fmtNum(o.divine_per_10k_gold, 4) : "-"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>}
+    </div>
+  );
+}
+
+// 金币获取方案：三种默认通货各自「消耗金币兑换通货」的最优路径（全部可用源单位比较）
+function GoldPlansPanel({ state }) {
+  const plans = state.gold_plans || [];
+  const renderOption = (target, opt, isBest) => (
+    <tr key={target + ":" + opt.source} style={isBest ? {} : {color: "#888"}}>
+      <td>{isBest &&
+        <span><UnitIcon unit={target} icons={state.unit_icons}/> {unitLabel(target)}</span>}</td>
+      <td>
+        <UnitIcon unit={opt.source} icons={state.unit_icons}/> {unitLabel(opt.source)}
+        {!isBest && <span style={{fontSize: 11}}>（备选）</span>}
+      </td>
+      <td><PathView path={opt.path} icons={state.unit_icons}/></td>
+      <td>1 {unitLabel(opt.source)} ≈ {fmtNum(opt.final_amount, 4)} {unitLabel(target)}</td>
+      <td>{opt.gold_per_unit !== null && opt.gold_per_unit !== undefined
+        ? <span>{fmtNum(opt.gold_per_unit, 0)} 金币/个
+            <span style={{color: "#777", fontSize: 11}}>
+              （每 1 万金币 ≈ {fmtNum(10000 / opt.gold_per_unit, 4)} {unitLabel(target)}）</span></span>
+        : <span style={{color: "#777"}}>未知（缺 Currency Exchange 值）</span>}</td>
+    </tr>
+  );
+  return (
+    <div className="panel">
+      <div className="panel-title" style={{cursor: "default"}}>
+        金币获取方案（消耗金币兑换三种默认通货的最优路径，金币成本最低者优先）
+      </div>
+      <table className="eco" style={{marginTop: 10}}>
+        <thead><tr><th>目标</th><th>源通货</th><th>路径</th><th>兑换率</th><th>金币成本</th></tr></thead>
+        <tbody>
+          {plans.map(p => (
+            <React.Fragment key={p.target}>
+              {p.best
+                ? renderOption(p.target, p.best, true)
+                : <tr key={p.target}>
+                    <td><UnitIcon unit={p.target} icons={state.unit_icons}/> {unitLabel(p.target)}</td>
+                    <td colSpan="4" style={{color: "#777"}}>暂无可达路径，请先执行抓取同步</td>
+                  </tr>}
+              {(p.alternatives || []).slice(0, 3).map(o => renderOption(p.target, o, false))}
+            </React.Fragment>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -593,8 +709,9 @@ function TradePage({ category }) {
       <div className="meta-line">
         {meta.source}；页面只读展示，按最新比例自动计算最优兑换路径与最佳套利方案
       </div>
+      <ArbitragePanel state={state} reload={load}/>
       <MarketRatePanel state={state} reload={load}/>
-      <ArbitragePanel state={state}/>
+      <GoldPlansPanel state={state}/>
       <BestPlanSection state={state}/>
       <TradeHistory state={state} reload={load}/>
     </div>

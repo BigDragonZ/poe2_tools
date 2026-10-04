@@ -360,19 +360,19 @@ def add_trade_rate(from_unit, to_unit, amount_from, amount_to, side="sell",
 
 
 def replace_auto_trade_rates(rates, category="default", db_path=None):
-    """整批写入桌面端抓取的汇率：同类别同方向（from/to/side）的旧自动记录先删再插。
+    """整批替换桌面端抓取的汇率：先清空该类别全部旧自动记录，再插入本批。
 
-    实现「每次只保留最近一次抓取比例」。
+    实现「每次只保留最近一次抓取记录」：上一批中本次未覆盖的方向一并清除，
+    避免过期单位（如改名前的物品名）残留。手动记录（source='manual'）不受影响。
     rates 元素：{"from_unit", "to_unit", "amount_from", "amount_to", "side"}。
     返回写入条数。
     """
     with _DB_LOCK, _connect(db_path) as conn:
+        conn.execute(
+            "DELETE FROM trade_rates WHERE source = 'auto' AND category = ?",
+            (category,),
+        )
         for r in rates:
-            conn.execute(
-                "DELETE FROM trade_rates WHERE source = 'auto' AND category = ?"
-                " AND from_unit = ? AND to_unit = ? AND side = ?",
-                (category, r["from_unit"], r["to_unit"], r["side"]),
-            )
             conn.execute(
                 "INSERT INTO trade_rates(from_unit, to_unit, amount_from, amount_to, side,"
                 " source, category, created_at) VALUES (?, ?, ?, ?, ?, 'auto', ?, ?)",
@@ -433,6 +433,44 @@ def get_item_icons_by_names(names, db_path=None):
         return {r["name_zh"]: r["icon_path"] for r in rows}
 
 
+def get_currency_snapshots(season_id=None, db_path=None):
+    """最新一次通货模块（Economy_Currency）快照：每物品最新一条（默认当前赛季）。
+
+    返回套利候选筛选所需的全部字段（slug/name_zh/name_en/wiki_slug/ref_amount/
+    ref_currency/item_amount/price_divine/price_chaos 等）；无数据返回 []。
+    name_en 优先取信息库 wiki 物品页 BaseType 名（权威游戏内英文名，含撇号等
+    标点，如 Perfect Jeweller's Orb）；信息库未抓取时回退快照名（wiki_slug
+    下划线转空格，丢标点）。
+    """
+    if season_id is None:
+        season = get_current_season(db_path)
+        if season is None:
+            return []
+        season_id = season["id"]
+    _, rows = get_module_snapshots("Economy_Currency", season_id, db_path=db_path)
+    if not rows:
+        return rows
+    with _connect(db_path) as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'item_info'"
+        ).fetchone()
+        if exists is None:
+            return rows
+        info = conn.execute(
+            """SELECT i.slug AS slug, ii.name_en AS name_en
+               FROM item_info ii
+               JOIN items i ON i.id = ii.item_id
+               JOIN modules m ON m.id = i.module_id
+               WHERE m.slug = 'Economy_Currency' AND ii.name_en IS NOT NULL"""
+        ).fetchall()
+    proper_names = {r["slug"]: r["name_en"] for r in info}
+    for row in rows:
+        proper = proper_names.get(row["slug"])
+        if proper:
+            row["name_en"] = proper
+    return rows
+
+
 # ---------- 信息库 ----------
 
 def get_gold_costs_by_slugs(slugs, db_path=None):
@@ -457,6 +495,54 @@ def get_gold_costs_by_slugs(slugs, db_path=None):
             list(slugs),
         ).fetchall()
         return {r["slug"]: r["gold_cost"] for r in rows}
+
+
+def get_gold_costs_by_names_en(names=None, db_path=None):
+    """按物品英文名查信息库的 Currency Exchange 金币消耗，返回 {name_en: gold_cost}。
+
+    names=None 时返回全部有金币消耗的条目（交易页物品单位 VE 映射用）。
+    """
+    with _connect(db_path) as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'item_info'"
+        ).fetchone()
+        if exists is None:
+            return {}
+        sql = "SELECT name_en, gold_cost FROM item_info" \
+              " WHERE gold_cost IS NOT NULL AND name_en IS NOT NULL"
+        params: list = []
+        if names:
+            placeholders = ",".join("?" for _ in names)
+            sql += f" AND name_en IN ({placeholders})"
+            params = list(names)
+        sql += " GROUP BY name_en"
+        rows = conn.execute(sql, params).fetchall()
+        return {r["name_en"]: r["gold_cost"] for r in rows}
+
+
+def get_names_zh_by_names_en(db_path=None):
+    """物品英文名 → 中文名映射（items 与 item_info 两表合并，items 模块页名为准）。
+
+    交易页单位双名展示用；调用方按 canon_item_name 归一化后匹配（抹平撇号等
+    标点差异）。
+    """
+    with _connect(db_path) as conn:
+        names: dict = {}
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'item_info'"
+        ).fetchone()
+        if exists is not None:
+            rows = conn.execute(
+                "SELECT name_en, name_zh FROM item_info"
+                " WHERE name_en IS NOT NULL AND name_zh IS NOT NULL GROUP BY name_en"
+            ).fetchall()
+            names = {r["name_en"]: r["name_zh"] for r in rows}
+        rows = conn.execute(
+            "SELECT name_en, name_zh FROM items"
+            " WHERE name_en IS NOT NULL GROUP BY name_en"
+        ).fetchall()
+        names.update({r["name_en"]: r["name_zh"] for r in rows})
+        return names
 
 
 def upsert_item_info(item_id, wiki_url, gold_cost, name_zh, name_en, db_path=None):

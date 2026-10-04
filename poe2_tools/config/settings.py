@@ -196,6 +196,10 @@ class MarketScanSettings:
     hotkey_default: str = "f9"  # 默认通货（崇高/混沌/神圣）抓取热键
     hotkey_custom: str = "f10"  # 指定通货抓取热键
     custom_currency: str = ""  # 指定通货游戏内英文全名
+    # 自动套利批量抓取（交易模块「自动」子页）
+    hotkey_auto: str = "f11"  # 自动套利抓取热键
+    auto_range_lo: float = 0.5  # 候选通货神圣价值下限
+    auto_range_hi: float = 20.0  # 候选通货神圣价值上限
     # 结果面板截图偏移（修正框选偏差：实测需左移 10、下移 20）
     range_offset_x: int = -10
     range_offset_y: int = 20
@@ -240,6 +244,13 @@ def default_profiles() -> list[dict[str, KeyConfig]]:
 def _to_int(value: str, default: int) -> int:
     try:
         return int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def _to_float(value: str, default: float) -> float:
+    try:
+        return float(str(value).strip())
     except (TypeError, ValueError):
         return default
 
@@ -432,6 +443,13 @@ def load_settings(path: Path | None = None) -> Settings:
         config.get("MarketScan", "HotkeyCustom", fallback="f10").strip().lower() or "f10"
     )
     ms.custom_currency = config.get("MarketScan", "CustomCurrency", fallback="").strip()
+    ms.hotkey_auto = (
+        config.get("MarketScan", "HotkeyAuto", fallback="f11").strip().lower() or "f11"
+    )
+    ms.auto_range_lo = _clamp(
+        _to_float(config.get("MarketScan", "AutoRangeLo", fallback="0.5"), 0.5), 0.0, 100000.0)
+    ms.auto_range_hi = _clamp(
+        _to_float(config.get("MarketScan", "AutoRangeHi", fallback="20"), 20.0), 0.0, 100000.0)
     ms.range_offset_x = _clamp(
         _to_int(config.get("MarketScan", "RangeOffsetX", fallback="-10"), -10), -500, 500)
     ms.range_offset_y = _clamp(
@@ -519,6 +537,9 @@ def save_settings(s: Settings, path: Path | None = None) -> None:
         "HotkeyDefault": ms.hotkey_default,
         "HotkeyCustom": ms.hotkey_custom,
         "CustomCurrency": ms.custom_currency,
+        "HotkeyAuto": ms.hotkey_auto,
+        "AutoRangeLo": str(ms.auto_range_lo),
+        "AutoRangeHi": str(ms.auto_range_hi),
         "RangeOffsetX": str(ms.range_offset_x),
         "RangeOffsetY": str(ms.range_offset_y),
         "CurrencyA": ms.currency_a,
