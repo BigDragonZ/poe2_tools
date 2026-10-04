@@ -58,7 +58,7 @@ def _store_module_result(module_slug, season_id, items, db_path=None):
 
     fetched_at = datetime.now().isoformat(timespec="seconds")
     count = 0
-    for item in items:
+    for sort_order, item in enumerate(items):
         icon_path = None
         try:
             icon_path = localize_icon(item.get("icon_url"))
@@ -66,7 +66,7 @@ def _store_module_result(module_slug, season_id, items, db_path=None):
             icon_path = None  # 图标下载失败不阻断入库
         item_id = db.upsert_item(
             module["id"], item["slug"], item["name_zh"], item.get("name_en"),
-            icon_path, item.get("wiki_slug"), db_path=db_path,
+            icon_path, item.get("wiki_slug"), sort_order=sort_order, db_path=db_path,
         )
         price_divine, price_chaos = scraper.compute_prices(
             item.get("ref_currency"), item.get("ref_amount"),

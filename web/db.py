@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS items (
     name_en TEXT,
     icon_path TEXT,
     wiki_slug TEXT,
+    sort_order INTEGER,
     UNIQUE(module_id, slug)
 );
 CREATE TABLE IF NOT EXISTS snapshots (
@@ -102,6 +103,9 @@ def init_db(db_path=None):
     """建表（幂等）；对已存在的库做轻量迁移。"""
     with _DB_LOCK, _connect(db_path) as conn:
         conn.executescript(_SCHEMA)
+        item_cols = [r["name"] for r in conn.execute("PRAGMA table_info(items)")]
+        if "sort_order" not in item_cols:
+            conn.execute("ALTER TABLE items ADD COLUMN sort_order INTEGER")
         cols = [r["name"] for r in conn.execute("PRAGMA table_info(trade_rates)")]
         if "side" not in cols:
             conn.execute("ALTER TABLE trade_rates ADD COLUMN side TEXT NOT NULL DEFAULT 'sell'")
@@ -189,18 +193,25 @@ def get_module_by_slug(slug, db_path=None):
 
 # ---------- 物品与快照 ----------
 
-def upsert_item(module_id, slug, name_zh, name_en, icon_path, wiki_slug, db_path=None):
-    """按 (module_id, slug) 幂等插入/更新物品，返回物品 id。"""
+def upsert_item(module_id, slug, name_zh, name_en, icon_path, wiki_slug,
+                sort_order=None, db_path=None):
+    """按 (module_id, slug) 幂等插入/更新物品，返回物品 id。
+
+    sort_order 为物品在 poe2db 模块页面中的行序（0 起），用于展示时保持页面顺序；
+    传 None 表示不更新已有顺序。
+    """
     with _DB_LOCK, _connect(db_path) as conn:
         conn.execute(
-            """INSERT INTO items(module_id, slug, name_zh, name_en, icon_path, wiki_slug)
-               VALUES (?, ?, ?, ?, ?, ?)
+            """INSERT INTO items(module_id, slug, name_zh, name_en, icon_path, wiki_slug,
+                   sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(module_id, slug) DO UPDATE SET
                    name_zh = excluded.name_zh,
                    name_en = excluded.name_en,
                    wiki_slug = excluded.wiki_slug,
+                   sort_order = COALESCE(excluded.sort_order, items.sort_order),
                    icon_path = COALESCE(excluded.icon_path, items.icon_path)""",
-            (module_id, slug, name_zh, name_en, icon_path, wiki_slug),
+            (module_id, slug, name_zh, name_en, icon_path, wiki_slug, sort_order),
         )
         row = conn.execute(
             "SELECT id FROM items WHERE module_id = ? AND slug = ?",
@@ -258,7 +269,7 @@ def get_module_snapshots(module_slug, season_id, target_date=None, db_path=None)
                      SELECT MAX(s2.fetched_at) FROM snapshots s2
                      WHERE s2.item_id = s.item_id AND s2.season_id = s.season_id
                        AND date(s2.fetched_at) = ?)
-               ORDER BY i.slug""",
+               ORDER BY i.sort_order IS NULL, i.sort_order, i.slug""",
             (module_slug, season_id, target_date, target_date),
         ).fetchall()
         return target_date, [dict(r) for r in rows]
@@ -508,7 +519,7 @@ def list_library_items(search=None, module_slug=None, db_path=None):
                 JOIN modules m ON m.id = i.module_id
                 LEFT JOIN item_info info ON info.item_id = i.id
                 {where}
-                ORDER BY m.id, i.slug""",
+                ORDER BY m.id, i.sort_order IS NULL, i.sort_order, i.slug""",
             params,
         ).fetchall()
         return [dict(r) for r in rows]
