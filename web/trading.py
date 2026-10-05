@@ -340,6 +340,72 @@ def arbitrage_opportunities(rates, gold_values):
 
 
 
+# ---------- 指定类别：物品 出售/购买 路线对比 ----------
+
+def item_trade_routes(custom_rates, default_rates):
+    """指定类别物品交易路线：按物品拆分「出售」「购买」，各通货路线折神圣对比。
+
+    出售（持有物品换通货）：
+    - 挂单出售（listing）：参考市场卖单价（通货→物品边）挂单等成交；
+    - 即时成交（instant）：吃市场买单（物品→通货边）立即出货。
+    购买（持有通货换物品）：
+    - 即时购买（instant）：吃市场卖单（通货→物品边）立即买入；
+    - 挂单收购（listing）：参考市场买单价（物品→通货边）挂单等成交。
+    每条路线给出 1 个物品对应的通货数量（出售为收入、购买为成本）及折神圣
+    （经 default 类别三通货最优兑换路径折算，无法折算时为 None）。
+    出售按折神圣降序、购买按升序，首条即最优路线。
+    返回 [{"item", "sell": [路线...], "buy": [路线...]}]，路线含
+    {mode, currency, from_unit, to_unit, amount_from, amount_to,
+    per_item, per_item_divine, created_at}。
+    """
+    to_divine = {}
+    for cur in BASE_CURRENCIES:
+        if cur == "divine":
+            to_divine[cur] = 1.0
+        else:
+            to_divine[cur] = best_conversion(default_rates, cur, "divine")[0]
+    items = {}
+    for r in custom_rates:
+        if is_item_unit(r["from_unit"]) and r["to_unit"] in BASE_CURRENCIES:
+            items.setdefault(r["from_unit"], {}).setdefault("item_to_cur", []).append(r)
+        elif is_item_unit(r["to_unit"]) and r["from_unit"] in BASE_CURRENCIES:
+            items.setdefault(r["to_unit"], {}).setdefault("cur_to_item", []).append(r)
+    result = []
+    for item, sides in items.items():
+        sell, buy = [], []
+        for r in sides.get("cur_to_item", []):
+            # 通货→物品：市场卖单，每 1 物品的价格 = amount_from / amount_to 通货
+            cur = r["from_unit"]
+            per_item = r["amount_from"] / r["amount_to"]
+            conv = to_divine.get(cur)
+            entry = {"currency": cur, "from_unit": r["from_unit"],
+                     "to_unit": r["to_unit"], "amount_from": r["amount_from"],
+                     "amount_to": r["amount_to"], "per_item": per_item,
+                     "per_item_divine": per_item * conv if conv else None,
+                     "created_at": r.get("created_at")}
+            sell.append({**entry, "mode": "listing"})
+            buy.append({**entry, "mode": "instant"})
+        for r in sides.get("item_to_cur", []):
+            # 物品→通货：市场买单，每 1 物品得 amount_to / amount_from 通货
+            cur = r["to_unit"]
+            per_item = r["amount_to"] / r["amount_from"]
+            conv = to_divine.get(cur)
+            entry = {"currency": cur, "from_unit": r["from_unit"],
+                     "to_unit": r["to_unit"], "amount_from": r["amount_from"],
+                     "amount_to": r["amount_to"], "per_item": per_item,
+                     "per_item_divine": per_item * conv if conv else None,
+                     "created_at": r.get("created_at")}
+            sell.append({**entry, "mode": "instant"})
+            buy.append({**entry, "mode": "listing"})
+        sell.sort(key=lambda e: (e["per_item_divine"] is None,
+                                 -(e["per_item_divine"] or 0)))
+        buy.sort(key=lambda e: (e["per_item_divine"] is None,
+                                e["per_item_divine"] or 0))
+        result.append({"item": item, "sell": sell, "buy": buy})
+    result.sort(key=lambda g: g["item"])
+    return result
+
+
 # ---------- 每轮口径最优套利方案 ----------
 
 def rates_for_arbitrage(latest, default_latest, category):

@@ -501,6 +501,83 @@ function ArbitragePanel({ state }) {
   );
 }
 
+// 指定页：物品 出售/购买 路线对比（各通货路线折神圣，每表首条为最优）
+const ROUTE_MODES = {
+  sell: {listing: "挂单出售（参考卖单价，等成交）", instant: "即时成交（吃市场买单）"},
+  buy: {instant: "即时购买（吃市场卖单）", listing: "挂单收购（参考买单价，等成交）"},
+};
+
+function RouteTable({ routes, kind, state }) {
+  const ul = u => unitDualLabel(u, state.unit_labels);
+  return (
+    <table className="eco" style={{marginTop: 6}}>
+      <thead>
+        <tr><th>方式</th><th>市场比例</th><th>每 1 物品</th><th>折神圣 / 个</th></tr>
+      </thead>
+      <tbody>
+        {routes.map((r, i) => {
+          const best = i === 0 && r.per_item_divine !== null && r.per_item_divine !== undefined;
+          return (
+            <tr key={i} style={best ? {background: "#26221a"} : {}}>
+              <td>
+                {ROUTE_MODES[kind][r.mode]}
+                {best && <span className="pos" style={{marginLeft: 6, fontSize: 11}}>最优</span>}
+              </td>
+              <td>
+                <UnitIcon unit={r.from_unit} icons={state.unit_icons}/> {fmtNum(r.amount_from)} {ul(r.from_unit)}
+                <span className="swap">→</span>
+                <UnitIcon unit={r.to_unit} icons={state.unit_icons}/> {fmtNum(r.amount_to)} {ul(r.to_unit)}
+              </td>
+              <td>{fmtNum(r.per_item, 3)} {ul(r.currency)}</td>
+              <td className={best ? "pos" : ""}>
+                {r.per_item_divine === null || r.per_item_divine === undefined
+                  ? "-" : fmtNum(r.per_item_divine, 4)}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+function CustomRoutesPanel({ state }) {
+  const groups = state.custom_view || [];
+  const ul = u => unitDualLabel(u, state.unit_labels);
+  return (
+    <div className="panel">
+      <div className="panel-title" style={{cursor: "default"}}>
+        出售 / 购买 路线对比（各通货路线折神圣，首条为最优）
+      </div>
+      {groups.length === 0 &&
+        <div style={{color: "#777", marginTop: 8}}>
+          暂无数据，请在游玩工具「交易 · 指定」执行抓取
+        </div>}
+      {groups.map(g => (
+        <div key={g.item} style={{marginTop: 10}}>
+          <div style={{color: "#e8e8e8", fontSize: 15}}>
+            <UnitIcon unit={g.item} icons={state.unit_icons}/> <b>{ul(g.item)}</b>
+          </div>
+          {g.sell.length > 0 && g.sell[0].per_item_divine !== null
+            && g.sell[0].per_item_divine !== undefined &&
+            <div style={{color: "#999", marginTop: 4}}>
+              出售最优：{ROUTE_MODES.sell[g.sell[0].mode]}，{ul(g.sell[0].currency)} 方向
+              （{fmtNum(g.sell[0].amount_from)} {ul(g.sell[0].from_unit)} →
+              {" "}{fmtNum(g.sell[0].amount_to)} {ul(g.sell[0].to_unit)}，
+              每个折 <b className="pos">{fmtNum(g.sell[0].per_item_divine, 4)}</b> 神圣）
+            </div>}
+          <h4 style={{color: "#c8aa6e", margin: "10px 0 0", fontWeight: "normal"}}>
+            出售（持有物品 → 换通货）</h4>
+          <RouteTable routes={g.sell} kind="sell" state={state}/>
+          <h4 style={{color: "#c8aa6e", margin: "10px 0 0", fontWeight: "normal"}}>
+            购买（持有通货 → 换物品）</h4>
+          <RouteTable routes={g.buy} kind="buy" state={state}/>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function TradePage({ category }) {
   const [state, setState] = useState(null);
   const load = useCallback(() => {
@@ -515,6 +592,7 @@ function TradePage({ category }) {
       <div className="meta-line">
         {meta.source}；页面只读展示，按最新比例自动计算每轮口径最佳套利方案
       </div>
+      {category === "custom" && <CustomRoutesPanel state={state}/>}
       <ArbitragePanel state={state}/>
       <MarketRatePanel state={state}/>
     </div>

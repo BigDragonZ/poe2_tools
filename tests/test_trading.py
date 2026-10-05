@@ -467,3 +467,81 @@ def test_custom_only_round_trip_never_profitable_but_merged_cycle_is():
     cycles = trading.find_profitable_cycles(merged)
     assert len(cycles) == 1
     assert abs(cycles[0]["rate"] - 11 / 10.27) < 1e-9
+
+
+# ---------- 指定类别：物品 出售/购买 路线对比 ----------
+
+def _default_rates():
+    return [
+        rate("divine", "chaos", 1, 10.3, "buy"),
+        rate("chaos", "divine", 10.34, 1, "buy"),
+        rate("divine", "exalted", 1, 690, "buy"),
+        rate("exalted", "divine", 700, 1, "buy"),
+        rate("chaos", "exalted", 1, 68, "buy"),
+        rate("exalted", "chaos", 69, 1, "buy"),
+    ]
+
+
+def _custom_rates():
+    return [
+        rate("exalted", "item:X", 35, 1, "buy"),
+        rate("item:X", "exalted", 1, 22, "buy"),
+        rate("chaos", "item:X", 1, 1.07, "buy"),
+        rate("item:X", "chaos", 2.4, 1, "buy"),
+        rate("divine", "item:X", 1, 8, "buy"),
+        rate("item:X", "divine", 14.5, 1, "buy"),
+    ]
+
+
+def test_item_trade_routes_sell_best_is_divine_listing():
+    """出售最优 = 挂神圣卖单（1:8，每个折 0.125 神圣），即时吃买单最差。"""
+    groups = trading.item_trade_routes(_custom_rates(), _default_rates())
+    assert len(groups) == 1
+    sell = groups[0]["sell"]
+    assert sell[0]["mode"] == "listing"
+    assert sell[0]["currency"] == "divine"
+    assert sell[0]["per_item"] == 1 / 8
+    assert abs(sell[0]["per_item_divine"] - 0.125) < 1e-9
+    # 即时成交（吃神圣买单 14.5:1）折神圣最低之一，排在挂单之后
+    instant_divine = [e for e in sell if e["mode"] == "instant"
+                      and e["currency"] == "divine"][0]
+    assert abs(instant_divine["per_item"] - 1 / 14.5) < 1e-9
+    assert instant_divine["per_item_divine"] < sell[0]["per_item_divine"]
+
+
+def test_item_trade_routes_buy_best_is_exalted_listing():
+    """购买最优 = 挂崇高买单（22 崇高/个，折 22/700 神圣），即时吃神圣卖单最贵。"""
+    groups = trading.item_trade_routes(_custom_rates(), _default_rates())
+    buy = groups[0]["buy"]
+    assert buy[0]["mode"] == "listing"
+    assert buy[0]["currency"] == "exalted"
+    assert buy[0]["per_item"] == 22
+    assert abs(buy[0]["per_item_divine"] - 22 / 700) < 1e-9
+    # 最贵 = 即时购买吃神圣卖单（1:8 → 0.125 神圣/个）
+    assert buy[-1]["mode"] == "instant"
+    assert buy[-1]["currency"] == "divine"
+    assert abs(buy[-1]["per_item_divine"] - 0.125) < 1e-9
+
+
+def test_item_trade_routes_sell_sorted_desc_buy_sorted_asc():
+    groups = trading.item_trade_routes(_custom_rates(), _default_rates())
+    sell_div = [e["per_item_divine"] for e in groups[0]["sell"]]
+    buy_div = [e["per_item_divine"] for e in groups[0]["buy"]]
+    assert sell_div == sorted(sell_div, reverse=True)
+    assert buy_div == sorted(buy_div)
+
+
+def test_item_trade_routes_missing_conversion_sorted_last():
+    """默认类别缺比例无法折神圣时 per_item_divine 为 None，且排序沉底。"""
+    groups = trading.item_trade_routes(_custom_rates(), [])
+    sell = groups[0]["sell"]
+    divine_entries = [e for e in sell if e["currency"] == "divine"]
+    other_entries = [e for e in sell if e["currency"] != "divine"]
+    assert all(e["per_item_divine"] is not None for e in divine_entries)
+    assert all(e["per_item_divine"] is None for e in other_entries)
+    assert sell[-1]["per_item_divine"] is None
+    assert sell[0]["currency"] == "divine"
+
+
+def test_item_trade_routes_no_item_returns_empty():
+    assert trading.item_trade_routes(_default_rates(), _default_rates()) == []

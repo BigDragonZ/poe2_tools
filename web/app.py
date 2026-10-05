@@ -292,9 +292,15 @@ def api_trade_state(category: str = "default"):
         latest, db.latest_trade_rates("default"), category)
     gold_values = _gold_values(arb_rates)
     gv = {u: g["value"] for u, g in gold_values.items() if g["value"]}
+    # 指定类别：按物品拆分 出售/购买 路线（折神圣对比，首条为最优）
+    custom_view = None
+    if category == "custom":
+        custom_view = trading.item_trade_routes(
+            latest, db.latest_trade_rates("default"))
     return {
         "category": category,
         "latest": latest,
+        "custom_view": custom_view,
         "arb_plan": trading.best_arbitrage_round(arb_rates, gv),
         "opportunities": trading.arbitrage_opportunities(arb_rates, gv)[:10],
         "unit_labels": _unit_labels(arb_rates),
