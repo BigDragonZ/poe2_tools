@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-输入执行线程：SendInput 动作队列 + 拟人化 jitter + 漂移锁 + 急停清空。
+旋风输入执行线程：SendInput 动作队列 + 拟人化 jitter + 漂移锁 + 急停清空。
 
 - 按键注入走 Win32 SendInput（扫描码模式，游戏兼容性最好）。
   pywin32 未封装 SendInput 本体，故用 ctypes 调 user32.SendInput，
@@ -22,7 +22,7 @@ import threading
 import time
 from ctypes import wintypes
 
-from poe2_tools.modules.mapping.fsm import Action, ActionKind
+from poe2_tools.modules.cyclone.fsm import Action, ActionKind
 
 logger = logging.getLogger(__name__)
 

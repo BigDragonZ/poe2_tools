@@ -1,0 +1,64 @@
+{
+  "system": {
+    "resolution": [
+      2560,
+      1440
+    ],
+    "capture_fps": 60,
+    "foreground_check_ms": 500,
+    "toggle_button": "x2"
+  },
+  "vision": {
+    "q_roi": [
+      1912,
+      1358,
+      1940,
+      1388
+    ],
+    "e_roi": [
+      1977,
+      1358,
+      2005,
+      1388
+    ],
+    "life_roi": [
+      65,
+      1052,
+      300,
+      1080
+    ],
+    "match_confidence": 0.5,
+    "life_ocr_interval_ms": 500
+  },
+  "loot": {
+    "roi_size": 150,
+    "black_v_max": 40,
+    "aspect_ratio_min": 2.5,
+    "aspect_ratio_max": 8.0,
+    "area_min": 150,
+    "area_max": 6000,
+    "canny_threshold": [
+      50,
+      150
+    ],
+    "text_density_min": 0.08,
+    "cursor_lock_ms": 30,
+    "pathfinding_timeout_ms": 600,
+    "disappear_min_ms": 200,
+    "blacklist_cooldown_s": 5,
+    "blacklist_grid_px": 32
+  },
+  "combat": {
+    "engage_growth_frames": 2,
+    "disengage_timeout_s": 3.0,
+    "q_max_stacks": 6,
+    "q_debounce_ms": 500,
+    "e_full_charges": 3,
+    "e_cooldown_s": 4.0,
+    "life_threshold": 0.7,
+    "flask_interval_s": 3.5,
+    "q_key": "q",
+    "e_key": "e",
+    "flask_key": "1"
+  }
+}

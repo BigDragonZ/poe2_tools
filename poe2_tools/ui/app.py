@@ -11,9 +11,10 @@
 
 职责：
 - 启动时按需迁移旧版 AHK 配置并加载 Settings
-- 构造业务模块（背包整理/石碑速点/地图速点/战斗宏/刷图/输入记录），日志经 bus 汇入日志面板
-- 注册全局热键：战斗/整理/石碑/地图/F3/F4（功能热键，POE2 前台即生效，作用于当前
-  激活配置）、F5 标定（旋风/坐标/开发页）、F2 测试页输入记录（仅测试页）、F12 全局急停；
+- 构造业务模块（背包整理/石碑速点/地图速点/战斗宏/旋风引擎/输入记录），日志经 bus 汇入日志面板
+- 注册全局热键：战斗/整理/石碑/地图/F3/F4（功能热键，POE2 前台即生效；战斗热键在
+  旋风页分派给旋风引擎，否则作用于当前激活配置）、F5 标定（旋风/坐标/开发页）、
+  F2 测试页输入记录（仅测试页）、F12 全局急停；
   功能热键与当前页动作键同键时动作键优先；页不对时按动作键会在日志提示归属页
 - 「保存配置」把控件值校验夹取后写回 ini 并重注册热键，同时应用日志过滤
 """
@@ -37,10 +38,10 @@ from tkinter import ttk
 from poe2_tools.bridge.bus import bus
 from poe2_tools.config.migrate import merge_ahk_coords_file, migrate_file
 from poe2_tools.config.settings import (
-    CYCLONE_PROFILE,
     EMERGENCY_HOTKEY,
     INI_PATH,
     CURRENCY_NAMES,
+    PROFILE_COUNT,
     Point,
     Settings,
     load_settings,
@@ -51,15 +52,15 @@ from poe2_tools.core import window
 from poe2_tools.core.hotkey import HotkeyManager
 from poe2_tools.modules.bag import BagOrganizer
 from poe2_tools.modules.combat import CombatMacro
-from poe2_tools.modules.map_runner import MapRunner
-from poe2_tools.modules.mapping.assistant import MappingAssistant
-from poe2_tools.modules.market.scanner import CurrencyTradeScanner
-from poe2_tools.modules.mapping.calibrate import (
+from poe2_tools.modules.cyclone.calibrate import (
     CalibrateError,
-    Q6MarkSession,
-    capture_template,
+    MarkSession,
     normalize_roi,
 )
+from poe2_tools.modules.cyclone.config import save_config as save_cyclone_config
+from poe2_tools.modules.cyclone.engine import CycloneEngine
+from poe2_tools.modules.map_runner import MapRunner
+from poe2_tools.modules.market.scanner import CurrencyTradeScanner
 from poe2_tools.modules.measure import MeasureError, RangeMarkSession, normalize_range
 from poe2_tools.modules.recorder.recorder import InputRecorder
 from poe2_tools.modules.waystone import WaystoneRunner
@@ -106,10 +107,10 @@ PAGE_ACTION_KEYS = {
 # 状态轮询间隔
 STATUS_POLL_MS = 500
 
-# 刷图助手「启动」后等待 POE2 前台的轮询参数（点按钮时焦点在工具窗口，
+# 旋风引擎「启动」后等待 POE2 前台的轮询参数（点按钮时焦点在工具窗口，
 # 必然非前台，需等用户切回游戏再自动启动）
-MAPPING_START_POLL_MS = 500
-MAPPING_START_TIMEOUT_MS = 15000
+ENGINE_START_POLL_MS = 500
+ENGINE_START_TIMEOUT_MS = 15000
 
 # 旧版 AHK 配置路径（存在且新配置缺失时自动迁移）
 AHK_INI_PATH = INI_PATH.parent / "ahk" / "poe2_key_helper.ini"
@@ -135,9 +136,9 @@ class Poe2ToolsApp:
         self.settings = self._load_or_migrate()
         self.hotkeys = HotkeyManager()
         self.pending_calib: str | None = None
-        self._q6_marker: Q6MarkSession | None = None
+        self._marker: MarkSession | None = None
         self._range_marker: RangeMarkSession | None = None
-        self._mapping_start_gen = 0  # 待启动轮询换代计数（停止/重复点启动时作废旧轮询）
+        self._cyclone_start_gen = 0  # 旋风引擎待启动轮询换代计数（停止/重复点启动时作废旧轮询）
         # 当前模块与页面作用域（仅主线程写，热键回调线程只读，避免在热键线程触碰 tk）
         self._current_module = "combat"
         self._scope = "profile"
@@ -146,7 +147,7 @@ class Poe2ToolsApp:
         self.waystone = WaystoneRunner(self.settings, self.bag, logger=bus.log)
         self.map_runner = MapRunner(self.settings, self.bag, logger=bus.log)
         self.combat = CombatMacro(self.settings, logger=bus.log)
-        self.mapping = MappingAssistant(self.settings, logger=bus.log)
+        self.cyclone_engine = CycloneEngine(logger=bus.log)
         self.recorder = InputRecorder(logger=bus.log)
         self.market_scanner = CurrencyTradeScanner(self.settings, logger=bus.log)
 
@@ -173,9 +174,9 @@ class Poe2ToolsApp:
             "（功能热键作用于当前激活配置，标定/记录各归其页）"
         )
 
-        # 默认选中战斗模块，并按激活配置选内嵌子页（配置1 / 旋风）
+        # 默认选中战斗模块，并按激活配置选内嵌子页（配置1）
         profile_index = self.settings.combat.active_profile - 1
-        if 0 <= profile_index <= CYCLONE_PROFILE - 1:
+        if 0 <= profile_index < PROFILE_COUNT:
             self.combat_module.select_page(profile_index)
         self._switch_module("combat")
         self._sync_scope()
@@ -249,8 +250,8 @@ class Poe2ToolsApp:
             on_page_change=self._on_page_changed,
             on_save=self.save_config,
             on_calibrate=self.toggle_calibration,
-            on_mapping_start=self._mapping_start,
-            on_mapping_stop=self._mapping_stop,
+            on_cyclone_start=self._cyclone_start,
+            on_cyclone_stop=self._cyclone_stop,
         )
         self.general_module = GeneralModule(
             self.stacked,
@@ -338,13 +339,15 @@ class Poe2ToolsApp:
     def _on_page_changed(self, _page_id: str | None = None) -> None:
         """模块子页切换 / 底部导航切换的统一入口。
 
-        同步控件值；active_profile 跟随战斗模块子页（配置1=1，旋风=2=CYCLONE_PROFILE）。
+        同步控件值；active_profile 跟随战斗模块配置子页（旋风页不再是配置，
+        战斗热键在旋风页分派给旋风引擎，见 _combat_toggle）。
         """
         self.sync_controls()
         self._sync_scope()
         if self._current_module == "combat":
             index = self.combat_module.notebook.index(self.combat_module.notebook.select())
-            self.settings.combat.active_profile = index + 1
+            if 0 <= index < PROFILE_COUNT:
+                self.settings.combat.active_profile = index + 1
 
     def _sync_scope(self) -> None:
         """按（当前模块, 模块内子页）更新热键作用域（仅主线程写，热键回调线程只读）。"""
@@ -402,8 +405,9 @@ class Poe2ToolsApp:
     def register_hotkeys(self) -> None:
         """按当前配置注册全部热键；重复调用先清理旧热键。
 
-        功能热键（战斗/整理/石碑/地图/F3/F4）与模块/子页无关，POE2 前台即生效，
-        战斗宏作用于当前激活的配置页（active_profile 跟随配置/旋风子页切换）；
+        功能热键（战斗/整理/石碑/地图/F3/F4）与模块/子页无关，POE2 前台即生效；
+        战斗热键分派：当前子页是旋风页 → 旋风引擎启停，否则 → 战斗宏 toggle
+        （普通配置页作用于当前激活配置）；
         页面级动作键归属各自页面：F5 标定（旋风/坐标/开发）、F2 记录（测试），
         功能热键与当前页动作键同键时动作键优先；F12 急停全局。
         """
@@ -414,7 +418,7 @@ class Poe2ToolsApp:
         map_key = s.general.map_click.hotkey
         market_key = s.market_scan.hotkey
         self.hotkeys.register_when_poe_active(
-            "combat", combat_key, self.combat.toggle, self._function_guard(combat_key)
+            "combat", combat_key, self._combat_toggle, self._function_guard(combat_key)
         )
         self.hotkeys.register_when_poe_active(
             "bag", sort_key, self.bag.toggle, self._function_guard(sort_key)
@@ -464,8 +468,19 @@ class Poe2ToolsApp:
         )
         self.hotkeys.register("emergency", EMERGENCY_HOTKEY, self.emergency_stop)
 
+    def _combat_toggle(self) -> None:
+        """战斗热键分派（键盘线程）：旋风页 → 旋风引擎（未启动先启动，已启动则
+        toggle 赶路/停止）；其他页 → 战斗宏 toggle。"""
+        if self._scope == "cyclone":
+            if not self.cyclone_engine.running:
+                self.cyclone_engine.start()
+            else:
+                self.cyclone_engine.toggle()
+            return
+        self.combat.toggle()
+
     # ============================================================
-    # 标定流程（货币 + 刷图 Q6 + 开发测量）
+    # 标定流程（货币 + 旋风 Q/E 数字区 + 开发测量）
     # ============================================================
     @staticmethod
     def _calib_name(target: str) -> str:
@@ -477,23 +492,25 @@ class Poe2ToolsApp:
             # key 形如 point1 / range1
             prefix, index = key[:5], key[5:]
             return f"开发 {'点' if prefix == 'point' else '范围'}{index}"
-        return "刷图 Q=6 数字"
+        if kind == "cyclone":
+            return f"旋风 {key.upper()} 数字区"
+        return key
 
     def toggle_calibration(self, target: str) -> None:
         """「标定」按钮：进入/取消待标定状态，等待游戏内按 F5。"""
         if self.pending_calib == target:
             self.pending_calib = None
-            if target == "mapping:q6" and self._q6_marker is not None:
-                self._q6_marker.cancel()
+            if self._is_mark_target(target) and self._marker is not None:
+                self._marker.cancel()
             if target.startswith("measure:range") and self._range_marker is not None:
                 self._range_marker.cancel()
             self.log(f"已取消标定「{self._calib_name(target)}」")
         else:
             self.pending_calib = target
-            if target == "mapping:q6":
+            if self._is_mark_target(target):
                 self.log(
-                    f"标定「刷图 Q=6 数字」：请切换到游戏，将 Q 充满至显示 6 后按 "
-                    f"{CALIBRATE_KEY_RECORD.upper()} 进入标记，"
+                    f"标定「{self._calib_name(target)}」：请切换到游戏，"
+                    f"按 {CALIBRATE_KEY_RECORD.upper()} 进入标记，"
                     f"然后右键点击检测数字的左上角，再右键点击右下角；再次点击按钮取消"
                 )
             elif target.startswith("measure:range"):
@@ -504,6 +521,11 @@ class Poe2ToolsApp:
                     f"将鼠标指向目标后按 {CALIBRATE_KEY_RECORD.upper()} 记录；再次点击按钮取消"
                 )
         self._refresh_calib_buttons()
+
+    @staticmethod
+    def _is_mark_target(target: str) -> bool:
+        """是否为 F5 + 右键两角标记类标定目标（旋风 Q/E 数字区）。"""
+        return target.startswith("cyclone:")
 
     def _begin_range_mark(self) -> None:
         """开启/重启左键框选会话（开发页「框选」按钮或标记中按 F5）。"""
@@ -527,13 +549,16 @@ class Poe2ToolsApp:
             )
             return
         kind, key = target.split(":", 1)
-        if kind == "mapping":
-            # 刷图 Q=6：F5 进入右键两角标记模式（标记中再按 F5 = 重新开始）
-            if self._q6_marker is None:
-                self._q6_marker = Q6MarkSession(on_log=self.log, on_done=self._on_q6_marked)
-            self._q6_marker.cancel()
-            self._q6_marker.begin()
-            self.log("已进入 Q6 标记模式：右键点击检测数字的左上角，再右键点击右下角")
+        if self._is_mark_target(target):
+            # 旋风 Q/E 数字区：F5 进入右键两角标记模式（标记中再按 F5 = 重新开始）
+            if self._marker is None:
+                self._marker = MarkSession(on_log=self.log, on_done=self._on_marked)
+            self._marker.cancel()
+            self._marker.begin()
+            self.log(
+                f"已进入「{self._calib_name(target)}」标记模式："
+                "右键点击检测数字的左上角，再右键点击右下角"
+            )
             return
         if kind == "measure" and key.startswith("range"):
             self._begin_range_mark()  # 框选标记中按 F5 = 重新开始
@@ -551,29 +576,33 @@ class Poe2ToolsApp:
         self.log(f"已标定「{self._calib_name(target)}」({pos.x}, {pos.y})")
         self.root.after(0, self._refresh_after_calibration)
 
-    def _on_q6_marked(self, p1: Point, p2: Point) -> None:
-        """Q6 第二次右键回调（鼠标钩子线程）：转主线程完成标定。"""
-        self.root.after(0, lambda: self._finish_q6_mark(p1, p2))
+    def _on_marked(self, p1: Point, p2: Point) -> None:
+        """第二次右键回调（鼠标钩子线程）：转主线程完成标定。"""
+        self.root.after(0, lambda: self._finish_mark(p1, p2))
 
-    def _finish_q6_mark(self, p1: Point, p2: Point) -> None:
-        """两角标记完成：规范化 ROI → 截模板 → 写配置 → 热重载掩模。"""
-        if self.pending_calib != "mapping:q6":
+    def _finish_mark(self, p1: Point, p2: Point) -> None:
+        """两角标记完成：规范化 ROI → 写配置 → 刷新显示。
+
+        cyclone:q/e → ROI 写入 modules/cyclone/config.json 的 vision.q_roi/e_roi
+        （模块自包含，不写 ini；引擎每帧读 config，即时生效）。
+        """
+        target = self.pending_calib
+        if target is None or not self._is_mark_target(target):
             return  # 标记期间已被取消
         try:
             roi = normalize_roi(p1, p2, window.client_size())
-            capture_template(roi)
         except CalibrateError as exc:
             self.log(f"标定失败：{exc}")
             return
-        self.settings.combat.q6_roi = roi
-        save_settings(self.settings)
         self.pending_calib = None
+        key = "q_roi" if target == "cyclone:q" else "e_roi"
+        self.cyclone_engine.config["vision"][key] = list(roi)
+        save_cyclone_config(self.cyclone_engine.config)
         self.log(
-            f"已标定「刷图 Q=6 数字」区域 ({roi[0]}, {roi[1]}) - ({roi[2]}, {roi[3]})"
-            f"（模板 templates/q6.png）"
+            f"已标定「{self._calib_name(target)}」区域 ({roi[0]}, {roi[1]}) - ({roi[2]}, {roi[3]})"
+            f"（写入 modules/cyclone/config.json）"
         )
-        self.mapping.reload_q6()  # 热重载掩模，运行中立即生效
-        self.combat_module.refresh_mapping_roi(self.settings)
+        self.combat_module.refresh_cyclone_roi(self.cyclone_engine.config["vision"])
         self._refresh_calib_buttons()
 
     def _on_range_marked(self, p1: Point, p2: Point) -> None:
@@ -618,41 +647,41 @@ class Poe2ToolsApp:
         )
 
     # ============================================================
-    # 刷图自动化（三线程 + FSM，控制并入旋风页）
+    # 旋风引擎（modules/cyclone，三线程 + FSM）
     # ============================================================
-    def _mapping_start(self) -> None:
-        """「启动」按钮：POE2 前台时立即启动；否则等待切回游戏后自动启动。
+    def _cyclone_start(self) -> None:
+        """旋风页「启动」按钮：POE2 前台时立即启动；否则等待切回游戏后自动启动。
 
-        点按钮时焦点在工具窗口，必然非 POE2 前台，直接 start() 必失败；
+        与刷图助手同理：点按钮时焦点在工具窗口，必然非前台，直接 start() 必失败；
         因此失败后进入待启动轮询，检测到 POE2 前台即自动启动。
         """
-        self._mapping_start_gen += 1  # 作废旧轮询
-        if self.mapping.running or self.mapping.start():
+        self._cyclone_start_gen += 1  # 作废旧轮询
+        if self.cyclone_engine.running or self.cyclone_engine.start():
             return
         if window.is_poe_active():
             return  # 前台仍失败（如 dxcam 初始化失败），start() 内部已记录原因
-        self.log("刷图助手待启动：请切回 POE2 窗口，检测到前台后自动启动（15 秒内有效）")
-        self._mapping_start_poll(self._mapping_start_gen, 0)
+        self.log("旋风引擎待启动：请切回 POE2 窗口，检测到前台后自动启动（15 秒内有效）")
+        self._cyclone_start_poll(self._cyclone_start_gen, 0)
 
-    def _mapping_start_poll(self, gen: int, waited_ms: int) -> None:
-        """待启动轮询：POE2 前台即启动；换代/已运行/超时即终止。"""
-        if gen != self._mapping_start_gen or self.mapping.running:
+    def _cyclone_start_poll(self, gen: int, waited_ms: int) -> None:
+        """旋风引擎待启动轮询：POE2 前台即启动；换代/已运行/超时即终止。"""
+        if gen != self._cyclone_start_gen or self.cyclone_engine.running:
             return
-        if waited_ms >= MAPPING_START_TIMEOUT_MS:
-            self.log("等待 POE2 前台超时，刷图助手未启动：请重新点「启动」")
+        if waited_ms >= ENGINE_START_TIMEOUT_MS:
+            self.log("等待 POE2 前台超时，旋风引擎未启动：请重新点「启动」")
             return
         if window.is_poe_active():
-            self.mapping.start()
+            self.cyclone_engine.start()
             return
         self.root.after(
-            MAPPING_START_POLL_MS,
-            lambda: self._mapping_start_poll(gen, waited_ms + MAPPING_START_POLL_MS),
+            ENGINE_START_POLL_MS,
+            lambda: self._cyclone_start_poll(gen, waited_ms + ENGINE_START_POLL_MS),
         )
 
-    def _mapping_stop(self) -> None:
-        """「停止」按钮：停止刷图助手并清空模拟输入；同时取消待启动轮询。"""
-        self._mapping_start_gen += 1
-        self.mapping.stop(source="界面按钮")
+    def _cyclone_stop(self) -> None:
+        """旋风页「停止」按钮：停止旋风引擎并清空模拟输入；同时取消待启动轮询。"""
+        self._cyclone_start_gen += 1
+        self.cyclone_engine.stop(source="界面按钮")
 
     def _market_scan_trigger(self) -> None:
         """市场抓取热键回调（键盘线程）：转主线程触发交易页抓取。"""
@@ -674,8 +703,6 @@ class Poe2ToolsApp:
     # 状态轮询
     # ============================================================
     def _profile_name(self) -> str:
-        if self.settings.combat.active_profile == CYCLONE_PROFILE:
-            return "旋风"
         return f"配置{self.settings.combat.active_profile}"
 
     def _poll_status(self) -> None:
@@ -687,9 +714,9 @@ class Poe2ToolsApp:
         self.map_var.set("速点中" if self.map_runner.running else "空闲")
         self.profile_var.set(self._profile_name())
         self.general_module.set_cell_size(self.settings.general.sort.cell_size)
-        self.combat_module.refresh_mapping_roi(self.settings)
+        self.combat_module.refresh_cyclone_roi(self.cyclone_engine.config["vision"])
         self.dev_module.refresh_coords(self.settings)
-        self.combat_module.set_mapping_status(self.mapping.status())
+        self.combat_module.set_cyclone_status(self.cyclone_engine.status())
         self.dev_module.set_status(self.recorder.status())
         self.dev_module.refresh(self.settings)
         self.root.after(STATUS_POLL_MS, self._poll_status)
@@ -708,15 +735,15 @@ class Poe2ToolsApp:
 
     def emergency_stop(self) -> None:
         """F12：中断全部任务并释放所有按键。"""
-        if self._q6_marker is not None:
-            self._q6_marker.cancel()
+        if self._marker is not None:
+            self._marker.cancel()
         if self._range_marker is not None:
             self._range_marker.cancel()
         self.bag.request_stop()
         self.waystone.request_stop()
         self.map_runner.request_stop()
         self.combat.stop()
-        self.mapping.stop(source="F12 急停")
+        self.cyclone_engine.stop(source="F12 急停")
         self.recorder.stop()
         core_input.release_all()
         self.log("已紧急停止：全部任务中断，所有按键已释放")

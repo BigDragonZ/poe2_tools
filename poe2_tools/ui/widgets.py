@@ -3,8 +3,8 @@
 """
 界面共享小部件与显示名映射。
 
-KeyRowsFrame 复用于配置页与旋风页：每行一个按键，
-包含策略下拉（禁用/连点/按住不放）、执行间隔输入框、随机抖动复选框。
+KeyRowsFrame 用于配置页：每行一个按键，
+包含策略下拉（禁用/连点/按住不放）、执行间隔输入框、随机抖动输入框。
 """
 
 from __future__ import annotations
@@ -30,8 +30,6 @@ SKILL_NAMES = {
     "LButton": "左键", "RButton": "右键", "Space": "空格",
     "q": "Q", "w": "W", "e": "E", "r": "R", "t": "T",
 }
-# 旋风页鼠标按键显示名
-CYC_NAMES = {"LButton": "鼠标左键", "MButton": "鼠标中键", "RButton": "鼠标右键"}
 
 
 def parse_int(text: str, default: int) -> int:

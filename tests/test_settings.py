@@ -35,10 +35,8 @@ def test_defaults() -> None:
     assert len(s.combat.profiles) == sm.PROFILE_COUNT
     assert s.combat.profiles[0]["LButton"].mode == sm.MODE_SPAM
     assert s.combat.profiles[0]["q"].mode == sm.MODE_DISABLED
-    assert set(s.combat.cyclone.keys()) == set(sm.CYC_KEYS)
     assert s.dev.debug is False
     assert s.dev.log_level == "INFO"
-    assert s.combat.q6_roi is None
 
 
 # ============================================================
@@ -70,10 +68,10 @@ def test_roundtrip(temp_ini: Path) -> None:
 def test_saved_uses_new_sections(temp_ini: Path) -> None:
     save_settings(Settings())
     text = temp_ini.read_text(encoding="utf-8")
-    for section in ("[Combat]", "[Sort]", "[Tablet]", "[Map]", "[Cyclone]",
-                    "[Profile1]", "[Currency]", "[Bridge]", "[Mapping]", "[Measure]", "[Dev]"):
+    for section in ("[Combat]", "[Sort]", "[Tablet]", "[Map]",
+                    "[Profile1]", "[Currency]", "[Bridge]", "[Measure]", "[Dev]"):
         assert section in text
-    for legacy in ("[General]", "[Waystone]", "[Bag]"):
+    for legacy in ("[General]", "[Waystone]", "[Bag]", "[Cyclone]", "[Mapping]"):
         assert legacy not in text
 
 
@@ -96,7 +94,8 @@ def test_legacy_sections_fallback(temp_ini: Path) -> None:
     )
     s = load_settings()
     assert s.combat.hotkey == "f9"
-    assert s.combat.active_profile == 2
+    # 旧值 2（旋风页序号）在旋风重构后不再是配置，夹取回普通配置页 1
+    assert s.combat.active_profile == 1
     assert s.general.sort.hotkey == "f3"
     assert (s.general.sort.rows, s.general.sort.cols) == (6, 12)
     assert s.general.sort.interval_ms == 45
@@ -180,8 +179,17 @@ def test_tier_clamped(temp_ini: Path) -> None:
 
 
 def test_active_profile_clamped(temp_ini: Path) -> None:
+    """旋风页不再是配置：ActiveProfile 夹取到普通配置页范围。"""
     write_ini(temp_ini, "Combat", {"ActiveProfile": "99"})
-    assert load_settings().combat.active_profile == sm.CYCLONE_PROFILE
+    assert load_settings().combat.active_profile == sm.PROFILE_COUNT
+
+
+def test_legacy_cyclone_section_ignored(temp_ini: Path) -> None:
+    """旧 [Cyclone] 段（鼠标三键策略）读取时忽略，保存后自然消失。"""
+    write_ini(temp_ini, "Cyclone", {"LButton_mode": "spam", "LButton_interval": "100"})
+    s = load_settings()
+    save_settings(s)
+    assert "[Cyclone]" not in temp_ini.read_text(encoding="utf-8")
 
 
 def test_dev_log_level_invalid_falls_back(temp_ini: Path) -> None:

@@ -77,13 +77,6 @@ def test_migrate_random_switch_converts_to_jitter_ms() -> None:
     s = migrate_ahk_config(_build_ahk_ini())
     # AHK _random=1（±15% 比例）折算为等效毫秒：100ms → 15ms
     assert s.combat.profiles[0]["LButton"].jitter_ms == 15
-    assert s.combat.cyclone["LButton"].jitter_ms == 15
-
-
-def test_migrate_cyclone_mouse_keys() -> None:
-    s = migrate_ahk_config(_build_ahk_ini())
-    assert s.combat.cyclone["LButton"].mode == sm.MODE_SPAM
-    assert s.combat.cyclone["MButton"].mode == sm.MODE_DISABLED
 
 
 def test_migrate_migrates_single_profile() -> None:

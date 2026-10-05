@@ -3,10 +3,10 @@
 """
 战斗模块：配置页 + 旋风页（内嵌 Notebook）+ 战斗设置区。
 
-- 内嵌标签页：配置1（ProfileTab，8 键策略）、旋风（CycloneTab，鼠标三键 + 刷图自动化控制）
+- 内嵌标签页：配置1（ProfileTab，8 键策略）、旋风（CycloneTab，旋风引擎控制）
 - 战斗设置区：战斗宏热键 + 保存按钮
 - 子页切换经 on_page_change 上报 app（page_id ∈ {"profile", "cyclone"}），
-  用于热键作用域与 active_profile 跟随
+  用于热键作用域与战斗热键分派（旋风页 → CycloneEngine，配置页 → CombatMacro）
 """
 
 from __future__ import annotations
@@ -32,8 +32,8 @@ class CombatModule(ttk.Frame):
         on_page_change: Callable[[str], None],
         on_save: Callable[[], None],
         on_calibrate: Callable[[str], None],
-        on_mapping_start: Callable[[], None],
-        on_mapping_stop: Callable[[], None],
+        on_cyclone_start: Callable[[], None],
+        on_cyclone_stop: Callable[[], None],
     ) -> None:
         super().__init__(master)
         self._on_page_change = on_page_change
@@ -46,8 +46,8 @@ class CombatModule(ttk.Frame):
         self.cyclone_tab = CycloneTab(
             self.notebook,
             on_calibrate=on_calibrate,
-            on_mapping_start=on_mapping_start,
-            on_mapping_stop=on_mapping_stop,
+            on_engine_start=on_cyclone_start,
+            on_engine_stop=on_cyclone_stop,
         )
         self.notebook.add(self.cyclone_tab, text="旋风")
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
@@ -81,17 +81,17 @@ class CombatModule(ttk.Frame):
             settings.combat.hotkey = hotkey
 
     # --------------------------------------------------------
-    # 透传（旋风页 / 刷图自动化）
+    # 透传（旋风页：引擎）
     # --------------------------------------------------------
     def set_pending(self, pending: str | None) -> None:
         """透传待标定状态给旋风页（按钮文案）。"""
         self.cyclone_tab.set_pending(pending)
 
-    def refresh_mapping_roi(self, settings: Settings) -> None:
-        self.cyclone_tab.refresh_mapping_roi(settings)
+    def set_cyclone_status(self, status: dict) -> None:
+        self.cyclone_tab.set_engine_status(status)
 
-    def set_mapping_status(self, status: dict) -> None:
-        self.cyclone_tab.set_mapping_status(status)
+    def refresh_cyclone_roi(self, vision_cfg: dict) -> None:
+        self.cyclone_tab.refresh_engine_roi(vision_cfg)
 
     def select_page(self, index: int) -> None:
         """按索引选中内嵌子页（0=配置1，1=旋风）。"""

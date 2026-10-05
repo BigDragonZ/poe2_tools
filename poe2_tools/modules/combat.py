@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-战斗宏：多按键连点/按住。
+战斗宏：多按键连点/按住（只服务普通配置页；旋风由 modules/cyclone 引擎承接）。
 
 - 10ms 节拍调度循环 + SpamScheduler 到期时间驱动，间隔精确不漂移
 - 连点间隔带毫秒级随机附加（0~jitter_ms，每键可配）
 - 按住不放键在启动时按下、停止/失焦/急停时全部释放
-- 旋风页（active_profile == CYCLONE_PROFILE）：鼠标三键走同一调度
 - POE2 窗口失焦自动停止
 """
 
@@ -16,7 +15,6 @@ import threading
 import time
 
 from poe2_tools.config.settings import (
-    CYCLONE_PROFILE,
     MODE_HOLD,
     MODE_SPAM,
     KeyConfig,
@@ -85,7 +83,7 @@ class CombatMacro:
             self.active = True
             self._stop.clear()
 
-        self.log(f"战斗宏已启动（{self._profile_name()}）")
+        self.log(f"战斗宏已启动（配置{self.settings.combat.active_profile}）")
         threading.Thread(target=self._run, daemon=True).start()
 
     def stop(self) -> None:
@@ -99,15 +97,7 @@ class CombatMacro:
     # --------------------------------------------------------
     # 配置
     # --------------------------------------------------------
-    def _is_cyclone(self) -> bool:
-        return self.settings.combat.active_profile == CYCLONE_PROFILE
-
-    def _profile_name(self) -> str:
-        return "旋风" if self._is_cyclone() else f"配置{self.settings.combat.active_profile}"
-
     def _current_config(self) -> tuple[list[str], dict[str, KeyConfig]]:
-        if self._is_cyclone():
-            return list(self.settings.combat.cyclone.keys()), self.settings.combat.cyclone
         profile = self.settings.combat.profiles[self.settings.combat.active_profile - 1]
         return list(profile.keys()), profile
 

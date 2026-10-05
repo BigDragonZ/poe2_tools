@@ -4,8 +4,7 @@
 配置模型与 ini 读写（UTF-8）。
 
 集中定义桌面工具的全部配置，按功能分组为嵌套模型：
-- combat（[Combat]/[Cyclone]/[Profile1]/[Mapping] q6_roi）：战斗宏热键、激活配置、
-  旋风页与普通配置页按键策略、刷图 Q=6 检测区域
+- combat（[Combat]/[Profile1]）：战斗宏热键、激活配置、普通配置页按键策略
 - general.sort（[Sort]）：背包整理热键、网格行列、格距与批量间隔
 - general.tablet（[Tablet]）：石碑速点热键、货币、级别与批量间隔
 - general.map_click（[Map]）：地图速点热键与批量间隔
@@ -34,12 +33,9 @@ POE_WINDOW_TITLE = "Path of Exile 2"
 # 常量（与 AHK 版规约一致）
 # ============================================================
 PROFILE_COUNT = 1
-CYCLONE_PROFILE = PROFILE_COUNT + 1  # 旋风配置页序号（跟在普通配置页之后）
 
 # 普通战斗配置页按键（内部标识沿用 AHK 命名，界面显示名见 ui 层）
 SKILL_KEYS = ["LButton", "RButton", "Space", "q", "w", "e", "r", "t"]
-# 旋风页鼠标按键
-CYC_KEYS = ["LButton", "MButton", "RButton"]
 
 MODE_DISABLED = "disabled"
 MODE_SPAM = "spam"
@@ -114,18 +110,14 @@ class KeyConfig:
 
 @dataclass
 class CombatSettings:
-    """战斗分组：战斗宏热键、激活配置页、旋风/普通配置页、刷图 Q=6 检测区域。"""
+    """战斗分组：战斗宏热键、激活配置页、普通配置页按键策略。"""
 
     hotkey: str = "f2"
-    active_profile: int = 1  # 夹取 1~CYCLONE_PROFILE
-    cyclone: dict[str, KeyConfig] = field(default_factory=dict)   # [Cyclone]
+    active_profile: int = 1  # 夹取 1~PROFILE_COUNT
     profiles: list[dict[str, KeyConfig]] = field(default_factory=list)  # [Profile1]
-    q6_roi: tuple[int, int, int, int] | None = None  # [Mapping] q6_roi
 
     def __post_init__(self) -> None:
-        # cyclone/profiles 为空时填默认值（含默认键位策略）
-        if not self.cyclone:
-            self.cyclone = default_cyclone()
+        # profiles 为空时填默认值（含默认键位策略）
         if not self.profiles:
             self.profiles = default_profiles()
 
@@ -228,11 +220,6 @@ def default_key_config(key: str) -> KeyConfig:
     return KeyConfig(MODE_DISABLED, DEF_INTERVAL_MS, 15)
 
 
-def default_cyclone() -> dict[str, KeyConfig]:
-    """旋风页默认配置（鼠标三键）。"""
-    return {key: default_key_config(key) for key in CYC_KEYS}
-
-
 def default_profiles() -> list[dict[str, KeyConfig]]:
     """普通战斗配置页的默认配置。"""
     return [{key: default_key_config(key) for key in SKILL_KEYS} for _ in range(PROFILE_COUNT)]
@@ -323,7 +310,9 @@ def load_settings(path: Path | None = None) -> Settings:
 
     向后兼容：新段（[Combat]/[Sort]/[Tablet]）的键为空时回退读旧段旧键
     （[General] CombatHotkey/DumpHotkey/ActiveProfile、[Bag]、[Waystone]），
-    其余段（[Map]/[Cyclone]/[Profile1]/[Currency]/[Mapping]/[Measure]）段名不变。
+    其余段（[Map]/[Profile1]/[Currency]/[Measure]）段名不变。
+    旧 [Cyclone] 段（鼠标三键策略）与旧 [Mapping] 段（刷图 Q6 ROI）已随
+    旋风重构废弃，读取时忽略，保存时自然消失。
     """
     ini = path or INI_PATH
     config = configparser.ConfigParser()
@@ -338,7 +327,7 @@ def load_settings(path: Path | None = None) -> Settings:
     s.combat.hotkey = _read_value(config, "Combat", "Hotkey", ("General", "CombatHotkey")) or "f2"
     s.combat.active_profile = _clamp(
         _to_int(_read_value(config, "Combat", "ActiveProfile", ("General", "ActiveProfile")), 1),
-        1, CYCLONE_PROFILE,
+        1, PROFILE_COUNT,
     )
 
     # 背包整理分组：[Sort] ← 旧 [General] DumpHotkey、旧 [Bag]
@@ -375,10 +364,6 @@ def load_settings(path: Path | None = None) -> Settings:
         MIN_BATCH_INTERVAL_MS, MAX_BATCH_INTERVAL_MS,
     )
 
-    # 旋风页按键策略（段名不变）
-    for key in CYC_KEYS:
-        s.combat.cyclone[key] = _read_key_config(config, "Cyclone", key, default_key_config(key))
-
     # 货币坐标（段名不变，未标定槽位省略）
     for key in CURRENCY_KEYS:
         point = _read_point(config, "Currency", key)
@@ -396,13 +381,6 @@ def load_settings(path: Path | None = None) -> Settings:
     # WebSocket 桥（段名不变）
     s.bridge_enabled = config.get("Bridge", "Enabled", fallback="0").strip() in ("1", "true", "yes")
     s.bridge_port = _clamp(_to_int(config.get("Bridge", "Port", fallback="8322"), 8322), 1024, 65535)
-
-    # 刷图 Q=6 检测区域（段名不变，非法忽略）
-    q6_roi = config.get("Mapping", "q6_roi", fallback="").strip()
-    if q6_roi:
-        parts = [_to_int(p, 0) for p in q6_roi.split(",")]
-        if len(parts) == 4 and parts[2] > parts[0] and parts[3] > parts[1]:
-            s.combat.q6_roi = (parts[0], parts[1], parts[2], parts[3])
 
     # 开发分组：[Dev] 调试开关与日志级别
     s.dev.debug = config.get("Dev", "Debug", fallback="0").strip() in ("1", "true", "yes")
@@ -485,14 +463,6 @@ def save_settings(s: Settings, path: Path | None = None) -> None:
     map_click = s.general.map_click
     config["Map"] = {"Hotkey": map_click.hotkey, "Interval": str(map_click.interval_ms)}
 
-    cyclone_section: dict[str, str] = {}
-    for key in CYC_KEYS:
-        c = s.combat.cyclone.get(key, default_key_config(key))
-        cyclone_section[f"{key}_mode"] = c.mode
-        cyclone_section[f"{key}_interval"] = str(c.interval_ms)
-        cyclone_section[f"{key}_jitter"] = str(c.jitter_ms)
-    config["Cyclone"] = cyclone_section
-
     currency_section: dict[str, str] = {}
     for key in CURRENCY_KEYS:
         if key in s.currency:
@@ -511,11 +481,6 @@ def save_settings(s: Settings, path: Path | None = None) -> None:
         config[f"Profile{i + 1}"] = section
 
     config["Bridge"] = {"Enabled": "1" if s.bridge_enabled else "0", "Port": str(s.bridge_port)}
-
-    mapping_section: dict[str, str] = {}
-    if s.combat.q6_roi is not None:
-        mapping_section["q6_roi"] = ",".join(str(v) for v in s.combat.q6_roi)
-    config["Mapping"] = mapping_section
 
     measure_section: dict[str, str] = {}
     for i, p in sorted(s.dev.measure_points.items()):

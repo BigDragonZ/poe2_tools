@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-刷图自动化模块的 config.json 加载/保存/默认值合并（纯逻辑，可单测）。
+旋风模块的 config.json 加载/保存/默认值合并（纯逻辑，可单测）。
 
 - 默认配置与本文件同目录的 config.json（DEFAULT_CONFIG_PATH）
 - 加载时做深合并：用户文件缺的字段一律回落到默认值
@@ -29,8 +29,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "foreground_check_ms": 500,
         # 模式切换键（mouse 库命名：x2 = XButton2 侧键，用户习惯）
         "toggle_button": "x2",
-        # UI 感知按键：按下后挂起/恢复 FSM
-        "ui_keys": ["i", "tab", "esc"],
+    },
+    "vision": {
+        # Q/E 数字区与生命数值区（客户区坐标，2560×1440 基准）
+        "q_roi": [1912, 1358, 1940, 1388],
+        "e_roi": [1977, 1358, 2005, 1388],
+        "life_roi": [65, 1052, 300, 1080],
+        # 数字模板匹配度阈值（IoU）
+        "match_confidence": 0.5,
+        # 生命 OCR 节拍（毫秒，低频分支）
+        "life_ocr_interval_ms": 500,
     },
     "loot": {
         # 以光标为中心的检测 ROI 边长（像素）
@@ -58,13 +66,27 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # 黑名单坐标网格量化粒度（像素）
         "blacklist_grid_px": 32,
     },
-    "combos": {
-        # 点阵掩模匹配度阈值（掩模来自旋风页 templates/q.png，坐标复用旋风 Q 标定点）
-        "match_confidence": 0.92,
-        # E → Q 连招间隙（毫秒）
-        "e_to_q_delay_ms": 60,
-        # 连招冷却去抖锁（毫秒），无论成功与否都强制冷却
-        "combo_debounce_ms": 500,
+    "combat": {
+        # 接敌判定：Q 层数连续增长帧数
+        "engage_growth_frames": 2,
+        # 脱战判定：层数归零后无增长超时（秒）
+        "disengage_timeout_s": 3.0,
+        # Q 满层数（达到即释放）
+        "q_max_stacks": 6,
+        # Q 释放去抖（毫秒）
+        "q_debounce_ms": 500,
+        # E 满充能数（充能回满即释放）
+        "e_full_charges": 3,
+        # E 释放最小冷却间隔（秒）
+        "e_cooldown_s": 4.0,
+        # 低血喝药阈值（生命 当前/最大 比值）
+        "life_threshold": 0.7,
+        # 两次喝药最小间隔（秒）
+        "flask_interval_s": 3.5,
+        # 技能键位（硬编码 Q/E 格）与血瓶快捷键
+        "q_key": "q",
+        "e_key": "e",
+        "flask_key": "1",
     },
 }
 

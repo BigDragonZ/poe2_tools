@@ -17,7 +17,6 @@ from pathlib import Path
 
 from poe2_tools.config.settings import (
     CURRENCY_KEYS,
-    CYC_KEYS,
     PROFILE_COUNT,
     SKILL_KEYS,
     KeyConfig,
@@ -107,9 +106,6 @@ def migrate_ahk_config(raw: bytes) -> Settings:
     s.general.sort.interval_ms = _get_int(
         config, "Bag", "DumpInterval", s.general.sort.interval_ms
     )
-
-    for key in CYC_KEYS:
-        s.combat.cyclone[key] = _migrate_key_config(config, "Cyclone", key, default_key_config(key))
 
     for key in CURRENCY_KEYS:
         x, y = _get(config, "Currency", f"{key}_x"), _get(config, "Currency", f"{key}_y")

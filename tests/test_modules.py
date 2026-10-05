@@ -45,15 +45,6 @@ def test_current_config_profile_selection() -> None:
     assert cfg is s.combat.profiles[0]
 
 
-def test_current_config_cyclone_selection() -> None:
-    s = Settings()
-    s.combat.active_profile = sm.CYCLONE_PROFILE
-    macro = CombatMacro(s)
-    keys, cfg = macro._current_config()
-    assert keys == sm.CYC_KEYS
-    assert cfg is s.combat.cyclone
-
-
 # ============================================================
 # 地图速点
 # ============================================================
