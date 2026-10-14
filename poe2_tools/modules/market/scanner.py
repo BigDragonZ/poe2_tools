@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 
 from poe2_tools.config.settings import Point, Settings
 from poe2_tools.modules.market.driver import UIActionDriver, copy_to_clipboard
-from poe2_tools.modules.market.ocr import OcrEngine, RapidOcrEngine
+from poe2_tools.core.ocr import OcrEngine, RapidOcrEngine
 from poe2_tools.modules.market.parser import has_no_stock_text, parse_market_blocks
 
 if TYPE_CHECKING:

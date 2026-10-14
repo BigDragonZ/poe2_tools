@@ -20,7 +20,8 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+
+from poe2_tools.core.ocr import TextBlock  # noqa: F401 — 兼容旧引用（已上移 core/ocr.py）
 
 # 库存特征：中文「库存」或英文 Stock 的常见 OCR 变体
 _STOCK_RE = re.compile(r"库存|[s5]t[o0]ck", re.IGNORECASE)
@@ -43,16 +44,6 @@ _ROW_Y_RATIO = 0.6
 
 # 每个方向最多保留的挂单条数（按面板从上到下取前 N 条）
 MAX_RESULTS = 3
-
-
-@dataclass
-class TextBlock:
-    """OCR 文本块：文字 + 检测框中心坐标与高度（像素）。"""
-
-    text: str
-    cx: float
-    cy: float
-    h: float
 
 
 def _normalize(text: str) -> str:

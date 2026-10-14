@@ -46,6 +46,7 @@ from poe2_tools.core import input as core_input
 from poe2_tools.core import window
 from poe2_tools.core.timing import jitter_ms
 from poe2_tools.modules.base import Logger, ToggleRunner
+from poe2_tools.modules.stash.detect import stash_open
 
 # 悬停读取节奏（毫秒）：移动后等 tooltip / Ctrl+C 后等剪贴板落地
 HOVER_WAIT_MS = 350
@@ -58,9 +59,6 @@ MAX_CRAFT_ATTEMPTS = 8
 NO_CHANGE_LIMIT = 2
 # 剪贴板哨兵：读取前写入，读后仍是它说明格子无物品（或复制失败）
 CLIP_SENTINEL = "@@POE2_TOOLS_EMPTY@@"
-# 仓库开启检测：面板右缘采样点（客户区）与亮度阈值（开≈40 / 关≈120）
-STASH_PROBE_POINTS = [(850, 300), (850, 600), (850, 950)]
-STASH_PROBE_THRESHOLD = 80
 # 格子占用检测（OpenCV 单帧截图逐格判定）：格心内侧半宽与亮度阈值
 # （实测：空格≈8，有物品≥58，地图仓 medallion≈81）
 CELL_OCCUPIED_THRESHOLD = 30
@@ -273,24 +271,8 @@ class MapVaalDriver:
         return None if text == CLIP_SENTINEL else text
 
     def stash_open(self) -> bool:
-        """按面板右缘采样点亮度判断仓库界面是否打开（开≈40 / 关≈120）。"""
-        import mss  # noqa: PLC0415 懒导入
-
-        origin = window.client_origin()
-        if origin is None:
-            return False
-        regions = [
-            {"left": origin.x + x - 3, "top": origin.y + y - 3, "width": 6, "height": 6}
-            for x, y in STASH_PROBE_POINTS
-        ]
-        with mss.MSS() as sct:
-            means = []
-            for region in regions:
-                shot = sct.grab(region)
-                # 用 RGB 三通道求亮度近似（raw 含 Alpha=255 会抬高均值）
-                rgb = shot.rgb
-                means.append(sum(rgb) / len(rgb))
-        return sum(means) / len(means) < STASH_PROBE_THRESHOLD
+        """仓库界面是否打开（公共实现见 modules/stash/detect.py）。"""
+        return stash_open()
 
     def occupied_cells(
         self, origin: Point, cell: float, rows: int, cols: int

@@ -18,7 +18,7 @@
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| Python 桌面端 | 待人工验证 | 战斗宏（普通配置页） + 背包整理 + 货币坐标 + 石碑/地图速点 + 瓦地图（poe2_tools/，tkinter 界面） |
+| Python 桌面端 | 待人工验证 | 战斗宏（普通配置页） + 背包整理（F1 自动开箱：OCR 定位「倉庫」牌匾点击开箱 + OpenCV 识别背包网格存 [BagGrid] 档 + 跳过前列白名单转移） + 货币坐标 + 石碑/地图速点 + 瓦地图（poe2_tools/，tkinter 界面） |
 | 瓦地图（仓库批量） | 待人工验证 | Map 页取未满 6 词未污染图（悬停 Ctrl+C 读文本过滤，容量=通用页行×列，最左列保留）→ 背包点金/崇高补满 6 词 → 瓦前检查（不满 6 词不瓦）→ 盲点瓦尔 → 分类读图后四级分流存回（T16 Ctrl+左键归 XVI 页 → 物品稀有度+怪物效能≥阈值强存 100 地图仓 → 8 词强存高级地图仓 → 其他 Ctrl+左键自动归页）；Ctrl+F7 启动，仓库布局存 [StashUI]（poe2_tools/modules/map_vaal.py，「地图」页） |
 | 旋风引擎 | 已验证（2026-10-05） | 三线程（dxcam 截图/视觉仲裁/SendInput 执行）+ 确定性 FSM（IDLE/TRAVEL/ENGAGE/LOOTING）：按住左键赶路，Q 层数连续增长接敌放 E、满 6 放 Q，E 充能回满放 E，光标黑框拾取，低血 OCR 按 1 喝药；F2/侧键 x2 切换，Q/E 数字区 F5+右键两角标定（poe2_tools/modules/cyclone/，「旋风」页） |
 | 测试页（输入记录分析） | 待人工验证 | F2 切换记录鼠标按键与 Q/E 按下，按轮存 logs/recordings/；分析过滤自动重复/抖动、排除停顿，提取技能释放频率（poe2_tools/modules/recorder/，「测试」页） |
@@ -35,7 +35,8 @@
 - **功能热键属于功能、不绑标签页**（2026-10-02 确认）：战斗/整理/石碑/地图/F3/F4 在 POE2 前台即生效，战斗热键在旋风页分派给旋风引擎、否则作用于当前激活配置（2026-10-05 调整：旋风页不再是激活配置）；页面级动作键归属各自页面（F5 标定→旋风/坐标/开发，F2 记录→测试），功能热键与当前页动作键同键时动作键优先；F12 急停始终全局
 - **所有功能必须提供启动热键**（2026-10-03 确认）：每个功能都要能在游戏内按热键手动启动/切换，不能只靠界面按钮（如市场抓取 F8）
 - **代码复用方式：抽取公共模块**（2026-10-14 变更，取代 09 旧决策「复制后独立适配，不抽公共包」；公共代码必须有明确归属层与单一职责，不为复用而造抽象）；重构分期计划见 docs/重构方案.md
-- **坐标按分辨率分档**（2026-10-14 确认）：坐标类 ini 段（Sort.CellSize/StashUI/Currency/Measure）以 `基础段名@宽x高` 后缀分档，启动时按 POE2 客户区分辨率自动激活；档缺失时绝不回退其他分辨率坐标（仅无 `@` 变体的老配置回退基础段），提示进入标定；仅启动时检测、不监听运行时分辨率变化；旋风模块 config.json 独立体系不参与分档
+- **坐标按分辨率分档**（2026-10-14 确认）：坐标类 ini 段（Sort.CellSize/StashUI/Currency/Measure/BagGrid）以 `基础段名@宽x高` 后缀分档，启动时按 POE2 客户区分辨率自动激活；档缺失时绝不回退其他分辨率坐标（仅无 `@` 变体的老配置回退基础段），提示进入标定；仅启动时检测、不监听运行时分辨率变化；旋风模块 config.json 独立体系不参与分档
+- **背包整理自动开箱**（2026-10-14 确认）：F1 不再依赖「鼠标=第 1 格」约定——亮度探针检测仓库未开则 OCR 定位「倉庫」牌匾点击开箱（10s×3 轮询，失败手动兜底），背包网格 OpenCV 识别一次存 [BagGrid@宽x高] 档复用，转移跳过前 SkipCols 列白名单且不校验结果（仓库满自行处理），完成后保持仓库打开；F3/F4 格距标定保留给石碑/地图速点旧约定
 
 ---
 
@@ -63,8 +64,9 @@ D:/game/poe2_tools/
 ├── main.py                 # Python 桌面端入口（薄壳，调用 poe2_tools.ui.app.run_app）
 ├── poe2_tools/             # Python 桌面端（AHK → Python 重构后）
 │   ├── config/             # 配置模型与 ini 读写（settings.py）
-│   ├── core/               # 基础层：热键管理、窗口绑定、键鼠模拟、调度、时间规约、剪贴板读写
-│   ├── modules/            # 业务模块：背包整理、石碑速点、地图速点、瓦地图（map_vaal.py：仓库批量取图→打造满6词→瓦前检查→盲点瓦尔→四级分流存回）、战斗宏（普通配置页）、批量操作核心、开发测量（measure.py：范围规范化 + 左键框选会话）
+│   ├── core/               # 基础层：热键管理、窗口绑定、键鼠模拟、调度、时间规约、剪贴板读写、OCR 封装（ocr.py：RapidOCR 懒加载，2026-10-14 从 modules/market 上移）
+│   ├── modules/            # 业务模块：背包整理（bag.py：F1 自动开箱存仓）、石碑速点、地图速点、瓦地图（map_vaal.py：仓库批量取图→打造满6词→瓦前检查→盲点瓦尔→四级分流存回）、战斗宏（普通配置页）、批量操作核心、开发测量（measure.py：范围规范化 + 左键框选会话）
+│   │   └── stash/          # 藏身处仓库自动化（2026-10-14）：仓库开启亮度探针 +「倉庫」牌匾 OCR 定位（detect.py）+ 背包网格 OpenCV 晶格拟合识别（grid.py → [BagGrid@宽x高] 档）
 │   │   └── cyclone/        # 旋风引擎：dxcam 截图 + 双态数字识别（vision.py 白/暗模板 IoU）+ FSM（fsm.py：赶路/接敌/拾取/低血喝药）+ SendInput 执行（executor.py）+ 标定（calibrate.py：F5+右键两角）+ 配置（config.json：Q/E 数字区 ROI、节奏阈值）+ 模板提取（tools.py → templates/cyclone/）+ 文件日志（mlog.py → logs/cyclone.log）
 │   │   └── recorder/       # 测试页输入记录：F2 采集鼠标/Q/E 按下（recorder.py → logs/recordings/）+ 释放频率分析（analysis.py 纯逻辑）
 │   │   └── market/         # 通货市场比例抓取：UI 原子驱动（driver.py）+ OCR 文本解析（parser.py 纯逻辑）+ RapidOCR 封装（ocr.py）+ 双向抓取控制器（scanner.py，坐标复用 [Measure] point1~5/range3/range5）+ 默认/指定/自动批量抓取与交易菜单同步（exchange.py → web/data/economy.db，source=auto + category=default/custom/auto 整批替换只留最近一次抓取，含双向一致性复核：价差超 10 倍的异常对不发布；抓取前置「沒有存貨」检查：range5 区域识别到无存货提示则该方向按无挂单处理）+ 自动套利编排（arbitrage.py：通货快照候选筛选 + auto_pairs + category=auto）

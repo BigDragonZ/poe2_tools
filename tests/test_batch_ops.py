@@ -48,6 +48,12 @@ def test_grid_points_fractional_cell_rounds() -> None:
     assert [(p.x, p.y) for p in points] == [(0, 0), (53, 0), (105, 0)]
 
 
+def test_grid_points_skip_cols() -> None:
+    """跳过前 N 列（白名单）：每行从第 N+1 列开始。"""
+    points = list(grid_points(Point(100, 200), 50, 2, 3, skip_cols=1))
+    assert [(p.x, p.y) for p in points] == [(150, 200), (200, 200), (150, 250), (200, 250)]
+
+
 # ============================================================
 # 一键存仓
 # ============================================================
@@ -88,6 +94,15 @@ def test_run_dump_aborts_when_window_inactive() -> None:
     assert aborted is True
     assert [c for c in driver.calls if c[0] == "click"] == []
     assert driver.calls[-1] == ("up", "Ctrl")
+
+
+def test_run_dump_skip_cols() -> None:
+    """白名单列不点击：跳过前 1 列后 2×3 网格只点 4 格。"""
+    driver = FakeDriver()
+    aborted = run_dump(Point(10, 20), 50, 2, 3, 30, NEVER_STOP, ACTIVE, driver, skip_cols=1)
+    assert aborted is False
+    clicks = [c for c in driver.calls if c[0] == "click"]
+    assert [(c[1], c[2]) for c in clicks] == [(60, 20), (110, 20), (60, 70), (110, 70)]
 
 
 # ============================================================

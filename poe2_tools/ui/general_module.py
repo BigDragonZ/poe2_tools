@@ -36,6 +36,7 @@ class GeneralModule(ttk.Frame):
         master: tk.Misc,
         on_page_change: Callable[[str], None],
         on_save: Callable[[], None],
+        on_recognize_grid: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(master, padding=8)
         del on_page_change  # 单页无子页切换，保留参数与 app 调用签名兼容
@@ -56,6 +57,8 @@ class GeneralModule(ttk.Frame):
         self.cell_var = tk.StringVar(value="未标定")
         self.sort_hotkey_var = tk.StringVar()
         self.sort_interval_var = tk.StringVar()
+        self.skip_cols_var = tk.StringVar()
+        self.grid_var = tk.StringVar(value="未识别")
 
         # 热键捕获状态（同时只允许一路捕获）与当前值展示标签
         self._capturing = False
@@ -79,7 +82,28 @@ class GeneralModule(ttk.Frame):
         sort = ttk.LabelFrame(body, text="背包整理", padding=6)
         sort.pack(anchor=tk.W, fill=tk.X, pady=(0, 6))
         row = self._hotkey_row(sort, 0, "整理热键", "背包整理", self.sort_hotkey_var)
-        self._entry_row(sort, row, "整理间隔(ms)", self.sort_interval_var)
+        row = self._entry_row(sort, row, "整理间隔(ms)", self.sort_interval_var)
+        row = self._entry_row(sort, row, "跳过前列数", self.skip_cols_var)
+        ttk.Label(
+            sort,
+            text="白名单：转移时跳过背包前 N 列（如 1 = 从第 2 列开始）",
+            foreground="#64748b",
+        ).grid(row=row, column=0, columnspan=4, sticky=tk.W, pady=2)
+        row += 1
+        ttk.Label(sort, text="背包网格").grid(row=row, column=0, sticky=tk.W, pady=2)
+        ttk.Label(sort, textvariable=self.grid_var, foreground="#38bdf8").grid(
+            row=row, column=1, sticky=tk.W, pady=2
+        )
+        if on_recognize_grid is not None:
+            ttk.Button(
+                sort, text="重新识别背包网格", command=on_recognize_grid
+            ).grid(row=row, column=2, sticky=tk.W, padx=(8, 0), pady=2)
+        ttk.Label(
+            sort,
+            text="网格由 OpenCV 自动识别（需仓库打开）；F1 时仓库未开会自动寻箱开箱；"
+                 "点「重新识别」后请切回游戏，检测到前台自动识别（15 秒内有效）",
+            foreground="#64748b",
+        ).grid(row=row + 1, column=0, columnspan=4, sticky=tk.W, pady=2)
 
         ttk.Button(self, text="保存配置", command=on_save).pack(anchor=tk.W, pady=(4, 0))
 
@@ -163,6 +187,8 @@ class GeneralModule(ttk.Frame):
 
         self.sort_hotkey_var.set(sort.hotkey)
         self.sort_interval_var.set(str(sort.interval_ms))
+        self.skip_cols_var.set(str(sort.skip_cols))
+        self.set_grid_status(settings)
 
         self.summary_var.set(f"背包整理 {sort.hotkey.upper()}")
         self._refresh_hotkey_displays()
@@ -178,6 +204,17 @@ class GeneralModule(ttk.Frame):
             parse_int(self.sort_interval_var.get(), sort.interval_ms),
             MIN_BATCH_INTERVAL_MS, MAX_BATCH_INTERVAL_MS,
         )
+        sort.skip_cols = clamp(parse_int(self.skip_cols_var.get(), sort.skip_cols), 0, sort.cols)
+
+    def set_grid_status(self, settings: Settings) -> None:
+        """刷新背包网格识别状态显示。"""
+        bg = settings.bag_grid
+        if bg.recognized:
+            self.grid_var.set(
+                f"({bg.origin_x}, {bg.origin_y}) 格距 {bg.cell}px {bg.rows}×{bg.cols}"
+            )
+        else:
+            self.grid_var.set("未识别（打开仓库后按整理热键自动识别）")
 
     def set_cell_size(self, cell_size: int) -> None:
         """更新格子间距显示（F3/F4 标定结果，未标定时提示）。"""

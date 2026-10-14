@@ -26,10 +26,12 @@ from poe2_tools.core.timing import jitter_ms
 # ============================================================
 # 网格坐标计算（纯逻辑）
 # ============================================================
-def grid_points(origin: Point, cell: float, rows: int, cols: int) -> Iterator[Point]:
-    """以 origin 为第 1 格中心，逐格生成中心坐标（行优先）。"""
+def grid_points(
+    origin: Point, cell: float, rows: int, cols: int, skip_cols: int = 0
+) -> Iterator[Point]:
+    """以 origin 为第 1 格中心，逐格生成中心坐标（行优先，跳过前 skip_cols 列）。"""
     for row in range(rows):
-        for col in range(cols):
+        for col in range(skip_cols, cols):
             yield Point(round(origin.x + col * cell), round(origin.y + row * cell))
 
 
@@ -66,15 +68,16 @@ def run_dump(
     should_stop: Callable[[], bool],
     is_active: Callable[[], bool],
     driver: BatchDriver,
+    skip_cols: int = 0,
 ) -> bool:
     """
-    一键存仓核心：Ctrl 按住，以 origin 为第 1 格中心行优先遍历点击。
-    返回是否被中断。
+    一键存仓核心：Ctrl 按住，以 origin 为第 1 格中心行优先遍历点击
+    （跳过前 skip_cols 列白名单）。返回是否被中断。
     """
     driver.key_down("Ctrl")
     aborted = False
     try:
-        for point in grid_points(origin, cell, rows, cols):
+        for point in grid_points(origin, cell, rows, cols, skip_cols):
             if should_stop() or not is_active():
                 aborted = True
                 break

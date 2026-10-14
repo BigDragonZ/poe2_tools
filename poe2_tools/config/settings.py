@@ -136,6 +136,27 @@ class SortSettings:
     cols: int = DEFAULT_COLS
     interval_ms: int = DEF_DUMP_INTERVAL_MS
     cell_size: int = 0
+    # 转移白名单：跳过背包前 N 列（如配置 1 = 从第 2 列开始转移），不分档
+    skip_cols: int = 0
+
+
+@dataclass
+class BagGridSettings:
+    """背包网格识别结果（[BagGrid]，按分辨率分档）。
+
+    仓库打开时背包网格位置固定：OpenCV 识别一次存 ini 复用；
+    cell <= 0 表示当前分辨率档未识别。
+    """
+
+    origin_x: int = 0
+    origin_y: int = 0
+    cell: float = 0
+    rows: int = 0
+    cols: int = 0
+
+    @property
+    def recognized(self) -> bool:
+        return self.cell > 0 and self.rows > 0 and self.cols > 0
 
 
 @dataclass
@@ -258,6 +279,7 @@ class Settings:
     dev: DevSettings = field(default_factory=DevSettings)
     market_scan: MarketScanSettings = field(default_factory=MarketScanSettings)
     stash_ui: StashUISettings = field(default_factory=StashUISettings)  # [StashUI]
+    bag_grid: BagGridSettings = field(default_factory=BagGridSettings)  # [BagGrid]
     currency: dict[str, Point] = field(default_factory=dict)  # [Currency]
     # 分辨率坐标档（启动时由 ui 层注入当前 POE2 客户区宽高，不直接参与 ini 读写）：
     # 坐标类段按 "@宽x高" 后缀分档（见 PROFILED_SECTIONS）；coords_profile_exists
@@ -372,7 +394,7 @@ def _read_int_list(config: configparser.ConfigParser, section: str, key: str) ->
 # ============================================================
 # 参与分档的坐标类段：段名加 "@宽x高" 后缀（如 [StashUI@1600x1024]）。
 # Sort 档段只含 CellSize（热键/行列/间隔与分辨率无关，不分档）。
-PROFILED_SECTIONS = ("Sort", "StashUI", "Currency", "Measure")
+PROFILED_SECTIONS = ("Sort", "StashUI", "Currency", "Measure", "BagGrid")
 
 
 def _profile_section(base: str, resolution: Point | None) -> str:
@@ -450,6 +472,10 @@ def load_settings(path: Path | None = None, resolution: Point | None = None) -> 
     if sort_sec is not None:
         legacy = ("Bag", "CellSize") if sort_sec == "Sort" else None
         sort.cell_size = _to_int(_read_value(config, sort_sec, "CellSize", legacy), 0)
+    # 转移白名单：跳过背包前 N 列（不分档，0 = 不跳过）
+    sort.skip_cols = _clamp(
+        _to_int(_read_value(config, "Sort", "SkipCols"), 0), 0, sort.cols
+    )
 
     # 石碑速点分组：[Tablet] ← 旧 [Waystone]
     tablet = s.general.tablet
@@ -522,6 +548,15 @@ def load_settings(path: Path | None = None, resolution: Point | None = None) -> 
     ui.stash_grid_cols = _clamp(
         _to_int(_read_value(config, ui_sec, "GridCols"), ui.stash_grid_cols), 1, 30
     )
+
+    # 背包网格识别结果（按分辨率分档；档缺失时保留 0 = 未识别）
+    grid_sec = _resolve_section(config, "BagGrid", resolution) or ""
+    bg = s.bag_grid
+    bg.origin_x = _to_int(_read_value(config, grid_sec, "Origin_x"), 0)
+    bg.origin_y = _to_int(_read_value(config, grid_sec, "Origin_y"), 0)
+    bg.cell = _to_float(_read_value(config, grid_sec, "Cell"), 0)
+    bg.rows = _clamp(_to_int(_read_value(config, grid_sec, "Rows"), 0), 0, 30)
+    bg.cols = _clamp(_to_int(_read_value(config, grid_sec, "Cols"), 0), 0, 30)
 
     # 货币坐标（按分辨率分档；档缺失时全部未标定）
     cur_sec = _resolve_section(config, "Currency", resolution) or ""
@@ -615,7 +650,7 @@ def save_settings(s: Settings, path: Path | None = None) -> None:
             config.read_file(f)
     owned = {
         "Combat", "Sort", "Tablet", "Map", "MapVaal", "StashUI",
-        "Currency", "Measure", "Dev", "MarketScan",
+        "Currency", "Measure", "Dev", "MarketScan", "BagGrid",
         # 旧版 legacy 段：首次保存后自然消失
         "General", "Bag", "Waystone", "Cyclone", "Mapping",
         *(f"Profile{i + 1}" for i in range(PROFILE_COUNT)),
@@ -637,6 +672,7 @@ def save_settings(s: Settings, path: Path | None = None) -> None:
         "Cols": str(sort.cols),
         "Interval": str(sort.interval_ms),
         "CellSize": str(sort.cell_size),
+        "SkipCols": str(sort.skip_cols),
     }
     tablet = s.general.tablet
     config["Tablet"] = {
@@ -707,6 +743,16 @@ def save_settings(s: Settings, path: Path | None = None) -> None:
 
     config["Dev"] = {"Debug": "1" if s.dev.debug else "0", "LogLevel": s.dev.log_level}
 
+    bg = s.bag_grid
+    bag_grid_section = {
+        "Origin_x": str(bg.origin_x),
+        "Origin_y": str(bg.origin_y),
+        "Cell": str(bg.cell),
+        "Rows": str(bg.rows),
+        "Cols": str(bg.cols),
+    }
+    config["BagGrid"] = bag_grid_section
+
     ms = s.market_scan
     config["MarketScan"] = {
         "ClickDelay": str(ms.click_delay_ms),
@@ -732,6 +778,7 @@ def save_settings(s: Settings, path: Path | None = None) -> None:
         config[_profile_section("StashUI", s.resolution)] = dict(stash_ui_section)
         config[_profile_section("Currency", s.resolution)] = dict(currency_section)
         config[_profile_section("Measure", s.resolution)] = dict(measure_section)
+        config[_profile_section("BagGrid", s.resolution)] = dict(bag_grid_section)
 
     ini.parent.mkdir(parents=True, exist_ok=True)
     with open(ini, "w", encoding="utf-8") as f:

@@ -1,22 +1,34 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-OCR 引擎封装（懒加载，可注入替身）。
+OCR 引擎封装（core 层公共能力，懒加载，可注入替身）。
 
 默认使用 rapidocr_onnxruntime（含中英文模型，无需外部进程）；
-识别结果统一为带检测框中心坐标的文本块列表，供 parser 做行列重建。
+识别结果统一为带检测框中心坐标的文本块列表，供上层做行列重建/目标定位。
 rapidocr 不是硬依赖：未安装时在首次识别时抛出 OcrEngineError，
-扫描器与测试可注入任何实现 recognize(image) -> list[str] 的对象。
+调用方可注入任何实现 recognize_blocks(image) -> list[TextBlock] 的对象。
+
+2026-10-14 从 modules/market/ocr.py 上移（背包整理自动开箱的「倉庫」标签
+识别也需要 OCR，按「抽取公共模块」决策归入 core）。
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
-
-from poe2_tools.modules.market.parser import TextBlock
 
 if TYPE_CHECKING:
     from PIL import Image
+
+
+@dataclass
+class TextBlock:
+    """OCR 文本块：文字 + 检测框中心坐标与高度（像素）。"""
+
+    text: str
+    cx: float
+    cy: float
+    h: float
 
 
 class OcrEngineError(Exception):
@@ -49,7 +61,7 @@ class RapidOcrEngine:
         return self._engine
 
     def recognize_blocks(self, image: "Image.Image") -> list[TextBlock]:
-        """识别图像文本，返回带检测框中心坐标的文本块（供行列重建）。"""
+        """识别图像文本，返回带检测框中心坐标的文本块（供行列重建/目标定位）。"""
         import numpy as np  # noqa: PLC0415 随 opencv 依赖提供，懒导入
 
         engine = self._ensure_engine()

@@ -278,6 +278,7 @@ class Poe2ToolsApp:
             self.stacked,
             on_page_change=self._on_page_changed,
             on_save=self.save_config,
+            on_recognize_grid=self._recognize_bag_grid,
         )
         self.tablet_module = TabletModule(
             self.stacked,
@@ -689,6 +690,16 @@ class Poe2ToolsApp:
             0, lambda: self.general_module.set_cell_size(self.settings.general.sort.cell_size)
         )
 
+    def _recognize_bag_grid(self) -> None:
+        """「重新识别背包网格」按钮：后台线程识别（OpenCV 截图分析不阻塞 UI）。"""
+        import threading  # noqa: PLC0415 局部使用
+
+        def _run() -> None:
+            if self.bag.recognize_grid_now():
+                self.root.after(0, lambda: self.general_module.set_grid_status(self.settings))
+
+        threading.Thread(target=_run, daemon=True).start()
+
     # ============================================================
     # 旋风引擎（modules/cyclone，三线程 + FSM）
     # ============================================================
@@ -767,6 +778,7 @@ class Poe2ToolsApp:
         else:
             self.coords_var.set(f"{self.settings.coords_profile} 未标定")
         self.general_module.set_cell_size(self.settings.general.sort.cell_size)
+        self.general_module.set_grid_status(self.settings)
         self.combat_module.refresh_cyclone_roi(self.cyclone_engine.config["vision"])
         self.dev_module.refresh_coords(self.settings)
         self.combat_module.set_cyclone_status(self.cyclone_engine.status())
