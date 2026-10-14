@@ -12,29 +12,29 @@
 
 ### 1.1 当前阶段
 
-桌面端已于 2026-10-01 从 AutoHotkey 全量迁回 Python 分层架构（`poe2_tools/`：config / core / modules / bridge / ui，tkinter 界面）。2026-10-05 旋风页重构为独立旋风引擎（`poe2_tools/modules/cyclone/`：三线程 + 确定性 FSM，赶路/接敌放E/满6放Q/拾取/低血喝药）并**游戏内验证通过**，旧刷图模块 `modules/mapping/` 同日删除；旧 AHK 版保留在 `ahk/` 目录作回退对照，**人工验证通过后才物理删除**。地图词缀 OCR 识别、石碑属性识别为二期规划，暂不开发。
+桌面端已于 2026-10-01 从 AutoHotkey 全量迁回 Python 分层架构（`poe2_tools/`：config / core / modules / bridge / ui，tkinter 界面）。2026-10-05 旋风页重构为独立旋风引擎（`poe2_tools/modules/cyclone/`：三线程 + 确定性 FSM，赶路/接敌放E/满6放Q/拾取/低血喝药）并**游戏内验证通过**，旧刷图模块 `modules/mapping/` 同日删除。2026-10-14 启动 Claude Code 全盘重构（docs/重构方案.md，第 0 期完成排查清理：修复 4 项静默失败隐患、删除 bridge/server.py 死代码与 `ahk/` 旧版目录及配置迁移逻辑）。地图词缀 OCR 识别、石碑属性识别为二期规划，暂不开发。
 
 ### 1.2 主界面模块
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| Python 桌面端 | 待人工验证 | 战斗宏（普通配置页） + 背包整理 + 货币坐标 + 石碑/地图速点（poe2_tools/，tkinter 界面） |
+| Python 桌面端 | 待人工验证 | 战斗宏（普通配置页） + 背包整理 + 货币坐标 + 石碑/地图速点 + 瓦地图（poe2_tools/，tkinter 界面） |
+| 瓦地图（仓库批量） | 待人工验证 | Map 页取未满 6 词未污染图（悬停 Ctrl+C 读文本过滤，容量=通用页行×列，最左列保留）→ 背包点金/崇高补满 6 词 → 瓦前检查（不满 6 词不瓦）→ 盲点瓦尔 → 分类读图后四级分流存回（T16 Ctrl+左键归 XVI 页 → 物品稀有度+怪物效能≥阈值强存 100 地图仓 → 8 词强存高级地图仓 → 其他 Ctrl+左键自动归页）；Ctrl+F7 启动，仓库布局存 [StashUI]（poe2_tools/modules/map_vaal.py，「地图」页） |
 | 旋风引擎 | 已验证（2026-10-05） | 三线程（dxcam 截图/视觉仲裁/SendInput 执行）+ 确定性 FSM（IDLE/TRAVEL/ENGAGE/LOOTING）：按住左键赶路，Q 层数连续增长接敌放 E、满 6 放 Q，E 充能回满放 E，光标黑框拾取，低血 OCR 按 1 喝药；F2/侧键 x2 切换，Q/E 数字区 F5+右键两角标定（poe2_tools/modules/cyclone/，「旋风」页） |
 | 测试页（输入记录分析） | 待人工验证 | F2 切换记录鼠标按键与 Q/E 按下，按轮存 logs/recordings/；分析过滤自动重复/抖动、排除停顿，提取技能释放频率（poe2_tools/modules/recorder/，「测试」页） |
 | 开发页（测量坐标与框选范围） | 待人工验证 | 收集开发阶段信息：6 个测量坐标（按钮 + F5，同坐标模块流程）+ 6 个框选范围（开启后左键拖框），结果存 ini [Measure] 段（poe2_tools/modules/measure.py，「开发」页） |
 | 交易模块（市场比例抓取） | 待人工验证 | 内嵌 默认通货/指定/自动/比例测试 子标签：默认=三默认通货两两抓取（F9）、指定=指定通货×三默认（F10）、自动=套利批量抓取（F11：通货快照 0.5~20 神圣候选 × 三默认，比例写 web/data/economy.db（source=auto + category 区分页面，同类别整批替换、只保留最近一次抓取记录），分别输出到 Web 交易菜单「默认」「指定」「自动」页，每轮口径最佳套利方案与套利复核由对应页面计算展示；比例测试=A/B 双向抓取调试（F8）（poe2_tools/modules/market/，「交易」页） |
-| AHK 按键助手 | 已弃用，待删除 | ahk/ 目录，验证通过前保留作回退 |
 | 地图词缀识别 | 二期规划 | OCR/OpenCV 词缀解析 + 高危词缀警告 |
 | 石碑属性识别 | 二期规划 | 属性识别 + 合成路线推演 |
 
 ### 1.3 已确认的设计决策
 
 - POE2 坐标体系与 POE1 一致，沿用两点标定 + CellSize 网格推导；坐标一律使用客户区坐标（与 AHK CoordMode Client 一致），点击时换算屏幕坐标
-- **桌面端从 AHK 迁回 Python**（2026-10-01 变更，取代 09-30 的 AHK 决策；用户确认：先等价迁移，OCR 词缀识别二期；tkinter 界面保留作自动化工具，Web 前端定位是信息记录统计；`ahk/` 目录在人工验证通过后删除）
+- **桌面端从 AHK 迁回 Python**（2026-10-01 变更，取代 09-30 的 AHK 决策；用户确认：先等价迁移，OCR 词缀识别二期；tkinter 界面保留作自动化工具，Web 前端定位是信息记录统计；`ahk/` 目录与配置自动迁移逻辑已于 2026-10-14 第 0 期删除）
 - **所有批量操作必须提供执行间隔配置**（2026-09-30 确认；间隔带随机抖动，保留人工操作痕迹）
 - **功能热键属于功能、不绑标签页**（2026-10-02 确认）：战斗/整理/石碑/地图/F3/F4 在 POE2 前台即生效，战斗热键在旋风页分派给旋风引擎、否则作用于当前激活配置（2026-10-05 调整：旋风页不再是激活配置）；页面级动作键归属各自页面（F5 标定→旋风/坐标/开发，F2 记录→测试），功能热键与当前页动作键同键时动作键优先；F12 急停始终全局
 - **所有功能必须提供启动热键**（2026-10-03 确认）：每个功能都要能在游戏内按热键手动启动/切换，不能只靠界面按钮（如市场抓取 F8）
-- 代码复用方式：复制后独立适配，不抽公共包
+- **代码复用方式：抽取公共模块**（2026-10-14 变更，取代 09 旧决策「复制后独立适配，不抽公共包」；公共代码必须有明确归属层与单一职责，不为复用而造抽象）；重构分期计划见 docs/重构方案.md
 
 ---
 
@@ -60,23 +60,22 @@
 ```
 D:/game/poe2_tools/
 ├── main.py                 # Python 桌面端入口（薄壳，调用 poe2_tools.ui.app.run_app）
-├── ahk/                    # 旧版 AHK 按键助手（已弃用，人工验证通过后删除）
-│   ├── poe2_key_helper.ahk # 旧版主程序（回退对照用）
-│   └── poe2_key_helper.ini # 旧版配置（启动时自动迁移到 poe2_tools.ini）
 ├── poe2_tools/             # Python 桌面端（AHK → Python 重构后）
-│   ├── config/             # 配置模型与 ini 读写（settings.py）、AHK 配置迁移（migrate.py）
-│   ├── core/               # 基础层：热键管理、窗口绑定、键鼠模拟、调度、时间规约
-│   ├── modules/            # 业务模块：背包整理、石碑速点、地图速点、战斗宏（普通配置页）、批量操作核心、开发测量（measure.py：范围规范化 + 左键框选会话）
+│   ├── config/             # 配置模型与 ini 读写（settings.py）
+│   ├── core/               # 基础层：热键管理、窗口绑定、键鼠模拟、调度、时间规约、剪贴板读写
+│   ├── modules/            # 业务模块：背包整理、石碑速点、地图速点、瓦地图（map_vaal.py：仓库批量取图→打造满6词→瓦前检查→盲点瓦尔→四级分流存回）、战斗宏（普通配置页）、批量操作核心、开发测量（measure.py：范围规范化 + 左键框选会话）
 │   │   └── cyclone/        # 旋风引擎：dxcam 截图 + 双态数字识别（vision.py 白/暗模板 IoU）+ FSM（fsm.py：赶路/接敌/拾取/低血喝药）+ SendInput 执行（executor.py）+ 标定（calibrate.py：F5+右键两角）+ 配置（config.json：Q/E 数字区 ROI、节奏阈值）+ 模板提取（tools.py → templates/cyclone/）+ 文件日志（mlog.py → logs/cyclone.log）
 │   │   └── recorder/       # 测试页输入记录：F2 采集鼠标/Q/E 按下（recorder.py → logs/recordings/）+ 释放频率分析（analysis.py 纯逻辑）
 │   │   └── market/         # 通货市场比例抓取：UI 原子驱动（driver.py）+ OCR 文本解析（parser.py 纯逻辑）+ RapidOCR 封装（ocr.py）+ 双向抓取控制器（scanner.py，坐标复用 [Measure] point1~5/range3/range5）+ 默认/指定/自动批量抓取与交易菜单同步（exchange.py → web/data/economy.db，source=auto + category=default/custom/auto 整批替换只留最近一次抓取，含双向一致性复核：价差超 10 倍的异常对不发布；抓取前置「沒有存貨」检查：range5 区域识别到无存货提示则该方向按无挂单处理）+ 自动套利编排（arbitrage.py：通货快照候选筛选 + auto_pairs + category=auto）
-│   ├── bridge/             # 进程内事件总线（bus）与可选 WebSocket 桥接
+│   ├── bridge/             # 进程内事件总线（bus，事件分发）
 │   └── ui/                 # tkinter 界面（运行状态区 + 顶部模块导航 + 模块内高内聚配置，2026-10-03 重构）
-│       ├── app.py          # 主窗口与控制器：状态区 + 模块导航 + StackedView 四模块 + 热键注册 + 标定/急停
+│       ├── app.py          # 主窗口与控制器：状态区 + 模块导航 + StackedView 六模块 + 热键注册 + 标定/急停
 │       ├── stacked.py      # StackedView：Frame 堆叠切换（等价 QStackedWidget）
 │       ├── log_panel.py    # 全局日志面板：可折叠/展开 + 级别着色 + 级别过滤
 │       ├── combat_module.py   # 战斗模块（内嵌 配置1/旋风 子标签 + 战斗宏热键）
-│       ├── general_module.py  # 通用模块（整理/石碑速点/地图速点合并单页：背包网格通用 + 各自参数热键；热键支持按键捕获 + 手动输入）
+│       ├── general_module.py  # 通用模块（背包网格通用配置 + 背包整理；热键支持按键捕获 + 手动输入）
+│       ├── tablet_module.py   # 石碑模块（石碑速点独立页：热键 + 货币/级别 + 间隔；背包网格在通用页配置）
+│       ├── map_module.py      # 地图模块（地图速点独立页：热键 + 间隔；固定流程 点金×1→崇高×2→瓦尔×1）
 │       ├── dev_module.py      # 研发模块（内嵌 开发/测试/坐标 子标签 + 调试模式/日志级别）
 │       ├── trade_module.py    # 交易模块（内嵌 默认通货/指定/自动/比例测试 子标签；批量抓取结果按类别同步 Web 交易·默认/指定/自动页，不在本页展示；自动页=候选筛选预览+套利批量抓取）
 │       ├── profile_tab.py  # 配置子页（8 行按键策略）
@@ -125,7 +124,6 @@ D:/game/poe2_tools/
 2. `uv run python main.py` 启动 Python 桌面端主界面（tkinter，自动化工具）
 3. `uv run python -m web.app` 启动经济记录 Web 应用（http://127.0.0.1:8321 ）
 4. `uv run pytest` 运行单元测试
-5. （过渡期待删）AHK 语法校验：Git Bash 中需双斜杠防止路径转换：`"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe" //ErrorStdOut //validate ahk/poe2_key_helper.ahk`
 
 ### 验证策略
 

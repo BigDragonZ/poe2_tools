@@ -80,6 +80,8 @@ class ToggleRunner:
     def _run(self, origin: Point) -> None:
         try:
             self._work(origin)
+        except Exception as exc:  # noqa: BLE001 — 工作线程异常必须落日志，不能无声消失
+            self.log(f"{self.name}执行出错：{exc!r}", "ERROR")
         finally:
             with self._lock:
                 self._running = False

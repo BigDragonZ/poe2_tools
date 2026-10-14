@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-主窗口与应用控制器：Header 状态区 + StackedView 四模块 + 底部导航 + 日志面板。
+主窗口与应用控制器：Header 状态区 + StackedView 六模块 + 底部导航 + 日志面板。
 
 布局：
 - Header：POE2 前台 | 战斗/整理/石碑/地图状态 | 当前配置 | 当前模块 | 「急停: F12」常驻提示
-- Nav：模块导航栏（战斗 / 通用 / 研发 / 交易，位于运行状态区下方，选中态高亮）
-- Main View：StackedView 四模块切换（战斗 / 通用 / 研发 / 交易）
+- Nav：模块导航栏（战斗 / 通用 / 石碑 / 地图 / 研发 / 交易，位于运行状态区下方，选中态高亮）
+- Main View：StackedView 六模块切换（战斗 / 通用 / 石碑 / 地图 / 研发 / 交易）
 - Log Panel：可折叠，按级别着色，随 dev.log_level/debug 过滤
 
 职责：
-- 启动时按需迁移旧版 AHK 配置并加载 Settings
+- 启动时加载 Settings
 - 构造业务模块（背包整理/石碑速点/地图速点/战斗宏/旋风引擎/输入记录），日志经 bus 汇入日志面板
 - 注册全局热键：战斗/整理/石碑/地图/F3/F4（功能热键，POE2 前台即生效；战斗热键在
   旋风页分派给旋风引擎，否则作用于当前激活配置）、F5 标定（旋风/坐标/开发页）、
@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import platform
+import signal
 import sys
 from collections.abc import Callable
 
@@ -36,12 +37,12 @@ import tkinter as tk
 from tkinter import ttk
 
 from poe2_tools.bridge.bus import bus
-from poe2_tools.config.migrate import merge_ahk_coords_file, migrate_file
 from poe2_tools.config.settings import (
     EMERGENCY_HOTKEY,
     INI_PATH,
     CURRENCY_NAMES,
     PROFILE_COUNT,
+    POE_WINDOW_TITLE,
     Point,
     Settings,
     load_settings,
@@ -60,6 +61,7 @@ from poe2_tools.modules.cyclone.calibrate import (
 from poe2_tools.modules.cyclone.config import save_config as save_cyclone_config
 from poe2_tools.modules.cyclone.engine import CycloneEngine
 from poe2_tools.modules.map_runner import MapRunner
+from poe2_tools.modules.map_vaal import MapVaalRunner
 from poe2_tools.modules.market.scanner import CurrencyTradeScanner
 from poe2_tools.modules.measure import MeasureError, RangeMarkSession, normalize_range
 from poe2_tools.modules.recorder.recorder import InputRecorder
@@ -68,7 +70,9 @@ from poe2_tools.ui.combat_module import CombatModule
 from poe2_tools.ui.dev_module import DevModule
 from poe2_tools.ui.general_module import GeneralModule
 from poe2_tools.ui.log_panel import LogPanel
+from poe2_tools.ui.map_module import MapModule
 from poe2_tools.ui.stacked import StackedView
+from poe2_tools.ui.tablet_module import TabletModule
 from poe2_tools.ui.trade_module import TradeModule
 
 # 标定热键（固定）：F3/F4 背包格距，F5 记录货币/旋风标定点
@@ -80,7 +84,14 @@ CALIBRATE_KEY_RECORD = "f5"
 RECORDER_KEY = "f2"
 
 # 模块（导航栏）id 与显示名，按导航顺序
-MODULES = (("combat", "战斗"), ("general", "通用"), ("dev", "研发"), ("trade", "交易"))
+MODULES = (
+    ("combat", "战斗"),
+    ("general", "通用"),
+    ("tablet", "石碑"),
+    ("map", "地图"),
+    ("dev", "研发"),
+    ("trade", "交易"),
+)
 MODULE_NAMES = dict(MODULES)
 
 # 页面级作用域 id（当前模块, 模块内子页）→ 显示名
@@ -112,9 +123,6 @@ STATUS_POLL_MS = 500
 ENGINE_START_POLL_MS = 500
 ENGINE_START_TIMEOUT_MS = 15000
 
-# 旧版 AHK 配置路径（存在且新配置缺失时自动迁移）
-AHK_INI_PATH = INI_PATH.parent / "ahk" / "poe2_key_helper.ini"
-
 # 底部导航按钮配色（选中态高亮）
 NAV_BG = "#1e293b"
 NAV_FG = "#e2e8f0"
@@ -133,7 +141,8 @@ class Poe2ToolsApp:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self._boot_logs: list[str] = []
-        self.settings = self._load_or_migrate()
+        self.settings = self._load_settings()
+        window.configure_window_title(POE_WINDOW_TITLE)  # core 窗口绑定以配置标题为准
         self.hotkeys = HotkeyManager()
         self.pending_calib: str | None = None
         self._marker: MarkSession | None = None
@@ -146,6 +155,7 @@ class Poe2ToolsApp:
         self.bag = BagOrganizer(self.settings, logger=bus.log, on_calibrated=self._on_bag_calibrated)
         self.waystone = WaystoneRunner(self.settings, self.bag, logger=bus.log)
         self.map_runner = MapRunner(self.settings, self.bag, logger=bus.log)
+        self.map_vaal = MapVaalRunner(self.settings, logger=bus.log)
         self.combat = CombatMacro(self.settings, logger=bus.log)
         self.cyclone_engine = CycloneEngine(logger=bus.log)
         self.recorder = InputRecorder(logger=bus.log)
@@ -167,6 +177,7 @@ class Poe2ToolsApp:
             f"整理: {self.settings.general.sort.hotkey.upper()}，"
             f"石碑: {self.settings.general.tablet.hotkey.upper()}，"
             f"地图: {self.settings.general.map_click.hotkey.upper()}，"
+            f"瓦地图: {self.settings.general.map_vaal.hotkey.upper()}，"
             f"市场抓取: {self.settings.market_scan.hotkey.upper()}，"
             f"默认通货: {self.settings.market_scan.hotkey_default.upper()}，"
             f"指定通货: {self.settings.market_scan.hotkey_custom.upper()}，"
@@ -184,22 +195,11 @@ class Poe2ToolsApp:
         self._poll_status()
 
     # ============================================================
-    # 配置加载（含旧版迁移）
+    # 配置加载
     # ============================================================
-    def _load_or_migrate(self) -> Settings:
-        """新配置缺失且存在旧版 AHK 配置时自动迁移，然后加载。"""
-        if not INI_PATH.exists() and AHK_INI_PATH.exists():
-            migrated = migrate_file(AHK_INI_PATH, INI_PATH)
-            if migrated is not None:
-                self._boot_logs.append("检测到旧版 AHK 配置，已自动迁移到 poe2_tools.ini")
-                return migrated
+    def _load_settings(self) -> Settings:
+        """加载 ini 配置（旧版 AHK 迁移逻辑已随 ahk/ 目录移除）。"""
         settings = load_settings()
-        # 已有新配置但坐标缺失时，从旧版 AHK 配置增量同步坐标（不覆盖已有值）
-        synced = merge_ahk_coords_file(settings, AHK_INI_PATH)
-        if synced:
-            save_settings(settings)
-            names = "、".join(self._calib_name(target) for target in synced)
-            self._boot_logs.append(f"已从旧版 AHK 配置同步坐标：{names}")
         self._boot_logs.append(f"已加载配置：{INI_PATH}")
         return settings
 
@@ -241,7 +241,7 @@ class Poe2ToolsApp:
         ).grid(row=0, column=len(items) * 2, sticky=tk.W, padx=(8, 0))
 
     def _build_body(self) -> None:
-        """中部 Main View：StackedView 四模块。"""
+        """中部 Main View：StackedView 六模块。"""
         self.stacked = StackedView(self.root)
         self.stacked.pack(fill=tk.BOTH, expand=True, padx=10, pady=8)
 
@@ -254,6 +254,16 @@ class Poe2ToolsApp:
             on_cyclone_stop=self._cyclone_stop,
         )
         self.general_module = GeneralModule(
+            self.stacked,
+            on_page_change=self._on_page_changed,
+            on_save=self.save_config,
+        )
+        self.tablet_module = TabletModule(
+            self.stacked,
+            on_page_change=self._on_page_changed,
+            on_save=self.save_config,
+        )
+        self.map_module = MapModule(
             self.stacked,
             on_page_change=self._on_page_changed,
             on_save=self.save_config,
@@ -272,17 +282,21 @@ class Poe2ToolsApp:
 
         self.stacked.add("combat", self.combat_module)
         self.stacked.add("general", self.general_module)
+        self.stacked.add("tablet", self.tablet_module)
+        self.stacked.add("map", self.map_module)
         self.stacked.add("dev", self.dev_module)
         self.stacked.add("trade", self.trade_module)
         # 模块引用表：_sync_scope 按当前模块取子页
         self._modules = {
             "combat": self.combat_module,
             "general": self.general_module,
+            "tablet": self.tablet_module,
+            "map": self.map_module,
             "dev": self.dev_module,
         }
 
     def _build_nav(self) -> None:
-        """顶部导航栏（运行状态区之下、内容区之上）：四模块切换按钮，选中态高亮。"""
+        """顶部导航栏（运行状态区之下、内容区之上）：六模块切换按钮，选中态高亮。"""
         nav = ttk.Frame(self.root)
         nav.pack(fill=tk.X, padx=10, pady=(8, 0))
         self._nav_buttons: dict[str, tk.Button] = {}
@@ -326,6 +340,8 @@ class Poe2ToolsApp:
         """把配置载入全部模块控件。"""
         self.combat_module.load_from(self.settings)
         self.general_module.load_from(self.settings)
+        self.tablet_module.load_from(self.settings)
+        self.map_module.load_from(self.settings)
         self.dev_module.load_from(self.settings)
         self.trade_module.load_from(self.settings)
 
@@ -333,6 +349,8 @@ class Poe2ToolsApp:
         """把控件值同步回内存配置（含校验夹取）。"""
         self.combat_module.sync_to(self.settings)
         self.general_module.sync_to(self.settings)
+        self.tablet_module.sync_to(self.settings)
+        self.map_module.sync_to(self.settings)
         self.dev_module.sync_to(self.settings)
         self.trade_module.sync_to(self.settings)
 
@@ -428,6 +446,10 @@ class Poe2ToolsApp:
         )
         self.hotkeys.register_when_poe_active(
             "map", map_key, self.map_runner.toggle, self._function_guard(map_key)
+        )
+        vaal_key = s.general.map_vaal.hotkey
+        self.hotkeys.register_when_poe_active(
+            "map_vaal", vaal_key, self.map_vaal.toggle, self._function_guard(vaal_key)
         )
         # 市场抓取：热键线程转主线程触发交易页抓取（读取输入框需在主线程）
         self.hotkeys.register_when_poe_active(
@@ -711,7 +733,11 @@ class Poe2ToolsApp:
         self.combat_var.set("运行" if self.combat.active else "停止")
         self.bag_var.set("整理中" if self.bag.running else "空闲")
         self.way_var.set("速点中" if self.waystone.running else "空闲")
-        self.map_var.set("速点中" if self.map_runner.running else "空闲")
+        self.map_var.set(
+            "瓦图中" if self.map_vaal.running
+            else "速点中" if self.map_runner.running
+            else "空闲"
+        )
         self.profile_var.set(self._profile_name())
         self.general_module.set_cell_size(self.settings.general.sort.cell_size)
         self.combat_module.refresh_cyclone_roi(self.cyclone_engine.config["vision"])
@@ -742,6 +768,7 @@ class Poe2ToolsApp:
         self.bag.request_stop()
         self.waystone.request_stop()
         self.map_runner.request_stop()
+        self.map_vaal.request_stop()
         self.combat.stop()
         self.cyclone_engine.stop(source="F12 急停")
         self.recorder.stop()
@@ -757,8 +784,8 @@ class Poe2ToolsApp:
         self.sync_controls()
         try:
             save_settings(self.settings)
-        except Exception:
-            pass
+        except Exception as exc:  # 保存失败不能阻断退出流程，但必须留痕
+            self.log(f"保存配置失败：{exc!r}", "ERROR")
         self.emergency_stop()
         self.hotkeys.unregister_all()
         bus.unsubscribe(self._on_bus_message)
@@ -769,8 +796,20 @@ def run_app() -> None:
     """主入口。"""
     try:
         root = tk.Tk()
-        Poe2ToolsApp(root)
-        root.mainloop()
+        app = Poe2ToolsApp(root)
     except Exception as exc:
         print(f"\n启动 GUI 失败: {exc}", file=sys.stderr)
         sys.exit(1)
+
+    def _on_sigint(_sig: int, _frame: object) -> None:
+        # 有按键被批量操作按住时忽略 Ctrl+C：进程被杀会跳过 finally，导致按键卡死
+        if core_input.held_keys():
+            print("\n批量操作进行中，已忽略 Ctrl+C（按功能热键停止，或 F12 急停）")
+            return
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGINT, _on_sigint)
+    try:
+        root.mainloop()
+    except KeyboardInterrupt:
+        app.on_close()

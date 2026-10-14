@@ -15,7 +15,17 @@ from __future__ import annotations
 import ctypes
 from ctypes import wintypes
 
-from poe2_tools.config.settings import POE_WINDOW_TITLE, Point
+from poe2_tools.config.settings import Point  # Point 为共享数据模型，单向类型引用
+
+# 目标窗口标题关键字：缺省值与 config.settings.POE_WINDOW_TITLE 一致，
+# core 不依赖配置语义，app 启动时以配置值调用 configure_window_title() 覆盖
+_POE_TITLE = "Path of Exile 2"
+
+
+def configure_window_title(title: str) -> None:
+    """由应用启动时注入目标窗口标题关键字（取 config.settings.POE_WINDOW_TITLE）。"""
+    global _POE_TITLE  # noqa: PLW0603 — 进程级单例配置，仅启动时调用一次
+    _POE_TITLE = title
 
 user32 = ctypes.windll.user32
 
@@ -32,7 +42,7 @@ def _find_poe_hwnd() -> int:
         if length > 0:
             buf = ctypes.create_unicode_buffer(length + 1)
             user32.GetWindowTextW(hwnd, buf, length + 1)
-            if POE_WINDOW_TITLE in buf.value:
+            if _POE_TITLE in buf.value:
                 nonlocal found
                 found = hwnd
                 return False
@@ -58,7 +68,7 @@ def get_foreground_window_title() -> str:
 
 def is_poe_active() -> bool:
     """判断 POE2 窗口是否处于前台。"""
-    return POE_WINDOW_TITLE in get_foreground_window_title()
+    return _POE_TITLE in get_foreground_window_title()
 
 
 def is_poe_minimized() -> bool:

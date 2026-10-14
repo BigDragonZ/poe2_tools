@@ -13,8 +13,11 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Callable
+
+logger = logging.getLogger(__name__)
 
 Message = dict
 Subscriber = Callable[[Message], None]
@@ -44,8 +47,8 @@ class EventBus:
         for fn in subscribers:
             try:
                 fn(message)
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 — 单个订阅者异常不影响其他订阅者，但必须落日志
+                logger.exception("事件总线订阅者处理消息失败: %s", message)
 
     # --------------------------------------------------------
     # 便捷发布

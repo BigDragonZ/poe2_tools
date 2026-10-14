@@ -1,7 +1,7 @@
 # 架构文档
 
 > Python 桌面端（`poe2_tools/`）的分层架构、模块接口、前后端交互协议、配置文件与时间规约。
-> 描述与代码现状一致（2026-10-01 AHK → Python 全量重构后）。
+> 描述与代码现状一致（2026-10-14 第 0 期清理：移除无调用方的 WebSocket 桥 bridge/server.py 与 [Bridge] 配置段，bridge/ 仅保留事件总线；删除 ahk/ 旧版目录与 config/migrate.py 配置迁移逻辑）。
 
 ## 1. 总览
 
@@ -16,7 +16,7 @@
 │ core/       硬件级能力（窗口/输入/热键/调度）│
 └─────────────────────────────────────────────┘
    config/  配置模型与 ini 读写（横向，各层只读）
-   bridge/  进程内事件总线 + 可选 WebSocket（事件分发）
+   bridge/  进程内事件总线（事件分发，仅 bus）
 ```
 
 依赖方向规则：
@@ -32,18 +32,12 @@
 
 **`config/settings.py`** — 配置模型与 ini 读写（UTF-8，configparser）。
 
-- 数据模型：`Point(x, y)` 客户区坐标点；`KeyConfig(mode, interval_ms, jitter_ms)` 单键战斗配置；`Settings` 全部配置（热键、背包网格、石碑/地图、旋风、货币坐标、战斗配置页、桥接）
+- 数据模型：`Point(x, y)` 客户区坐标点；`KeyConfig(mode, interval_ms, jitter_ms)` 单键战斗配置；`Settings` 全部配置（热键、背包网格、石碑/地图、旋风、货币坐标、战斗配置页）
 - 常量：`PROFILE_COUNT = 1`、`CYCLONE_PROFILE = 2`、`SKILL_KEYS`（8 键）、`CYC_KEYS`（鼠标三键）、`MODES = ("disabled", "spam", "hold")`、批量/抖动/旋风检测相关常量、`EMERGENCY_HOTKEY = "f12"`
 - 关键函数：
   - `load_settings(path=None) -> Settings` — 从 ini 加载，字段非法时回退默认值并夹取范围
   - `save_settings(s, path=None) -> None` — 写回 ini（UTF-8）
   - `currency_coord(s, key, tier=1) -> Point | None` — 货币坐标解析，三级货币向右偏移（二级 +70px，三级 +140px）
-
-**`config/migrate.py`** — AHK 旧配置迁移。
-
-- `decode_ahk_ini(raw: bytes) -> str` — 混合编码（UTF-8 BOM + GBK 节名「配置N」）逐行容错解码
-- `migrate_ahk_config(raw: bytes) -> Settings` — 纯逻辑迁移：模式 int（1/2/3）→ 字符串（disabled/spam/hold）；FindText 字库代码（q_text/e_text）丢弃
-- `migrate_file(ahk_ini, target_ini) -> Settings | None` — 执行迁移并写盘；不删除源文件
 
 ### 2.2 core/（基础层）
 
@@ -114,27 +108,29 @@
 
 **`bridge/bus.py`** — 进程内事件总线（线程安全发布/订阅）。
 
-- `EventBus.subscribe(fn)` / `unsubscribe(fn)` / `publish(message)`（单订阅者异常不影响其他）
+- `EventBus.subscribe(fn)` / `unsubscribe(fn)` / `publish(message)`（单订阅者异常不影响其他，异常记日志）
 - 便捷发布：`log(message)` / `status(payload)` / `event(name, detail="")`
 - 模块级全局实例 `bus`：单进程应用，模块与 UI 共享
 
-**`bridge/server.py`** — 可选 WebSocket 适配器（FastAPI + uvicorn，默认关闭）。
-
-- `BridgeServer(bus, port, on_command=None)`；`start()` 后台线程启动 uvicorn（幂等）、`stop()`
-- 仅监听 `127.0.0.1`，端点 `/ws`；下行把总线消息原样广播给全部连接，上行 command 路由到注册的命令处理器
-
 ### 2.5 ui/（界面层，tkinter）
 
-- **`ui/app.py`** — `Poe2ToolsApp(root)` 主窗口与控制器：状态区 + 标签页 + 功能设置区 + 日志区；启动时按需迁移 AHK 旧配置；注册全局热键（战斗/整理/石碑/地图仅 POE2 前台生效，F3/F4 背包标定、F5 记录标定点、F12 全局急停）；`run_app()` 主入口
+- **`ui/app.py`** — `Poe2ToolsApp(root)` 主窗口与控制器：运行状态区 + 模块导航（战斗/通用/石碑/地图/研发/交易）+ StackedView 六模块 + 日志面板；注册全局热键（战斗/整理/石碑/地图仅 POE2 前台生效，F3/F4 背包标定、F5 记录标定点、F12 全局急停）；`run_app()` 主入口
+- **`ui/combat_module.py`** — 战斗模块（内嵌 配置1/旋风 子标签 + 战斗宏热键）
+- **`ui/general_module.py`** — 通用模块：背包网格通用配置（行/列/格距，整理/石碑/地图共享）+ 背包整理（热键 + 间隔）
+- **`ui/tablet_module.py`** — 石碑模块：石碑速点独立配置页（热键 + 货币/级别 + 间隔）
+- **`ui/map_module.py`** — 地图模块：地图速点独立配置页（热键 + 间隔）
+- **`ui/dev_module.py`** — 研发模块（内嵌 开发/测试/坐标 子标签 + 调试模式/日志级别）
+- **`ui/trade_module.py`** — 交易模块（内嵌 默认通货/指定/自动/比例测试 子标签）
 - **`ui/profile_tab.py`** — `ProfileTab(notebook, index)` 战斗配置页（8 行按键）
-- **`ui/cyclone_tab.py`** — `CycloneTab(master, on_calibrate, on_mapping_start, on_mapping_stop)` 旋风页：鼠标三键策略 + 刷图自动化控制分区（启动/停止、运行状态、Q6 标定）
+- **`ui/cyclone_tab.py`** — 旋疯子页：旋风引擎控制（启动/停止、运行状态）+ Q/E 数字区标定
 - **`ui/coords_tab.py`** — `CoordsTab(master, on_calibrate)` 坐标页：10 种货币标定（双列：左三级货币、右普通货币）
-- **`ui/settings_panel.py`** — `SettingsPanel(master, on_save)` 右侧功能设置区：热键 + 背包/石碑/地图参数 + 保存
-- **`ui/widgets.py`** — 共享小部件 `KeyRowsFrame`（策略下拉 + 间隔输入 + 抖动复选框）与显示名映射、`parse_int`/`clamp`
+- **`ui/recorder_tab.py`** — 测试子页：输入记录状态 + 分析报告 + 清空
+- **`ui/dev_tab.py`** — 开发子页：6 测量坐标 F5 + 6 框选范围左键拖框（存 ini [Measure]）
+- **`ui/widgets.py`** — 共享小部件 `KeyRowsFrame`（策略下拉 + 间隔输入 + 抖动输入）与显示名映射、`parse_int`/`clamp`
 
 ## 3. 前后端交互协议
 
-两套通道：进程内事件总线（tkinter UI 使用，主通道）与可选 WebSocket 桥（外部前端预留）。消息均为 JSON 可序列化 dict。
+唯一通道：进程内事件总线（tkinter UI 使用）。消息均为 JSON 可序列化 dict。
 
 ### 3.1 进程内事件总线 `bridge.bus`
 
@@ -202,40 +198,7 @@ JSON Schema（合并）：
 }
 ```
 
-当前 tkinter UI 实际消费 `log` 消息（汇入日志区）；状态区由 UI 每 500ms 轮询模块状态刷新。`status`/`event` 为总线约定消息，供 WebSocket 外部前端使用。
-
-### 3.2 可选 WebSocket 桥 `bridge.server`
-
-默认关闭（`[Bridge] Enabled=0`），仅监听 `127.0.0.1`，默认端口 8322（范围 1024-65535），端点 `/ws`。
-
-- **下行**：总线上的 log/status/event 消息原样 JSON 广播给全部连接（`ensure_ascii=False`）
-- **上行命令**：
-
-```json
-{"type": "command", "action": "str —— 命令名", "params": {}}
-```
-
-JSON Schema：
-
-```json
-{
-  "type": "object",
-  "required": ["type", "action", "params"],
-  "properties": {
-    "type": {"const": "command"},
-    "action": {"type": "string"},
-    "params": {"type": "object"}
-  }
-}
-```
-
-示例：
-
-```json
-{"type": "command", "action": "stop_all", "params": {}}
-```
-
-命令由构造 `BridgeServer` 时注册的 `on_command` 处理器路由到业务层；非 JSON 或非 command 消息静默忽略，处理器异常只记日志不断连。
+当前 tkinter UI 实际消费 `log` 消息（汇入日志区）；状态区由 UI 每 500ms 轮询模块状态刷新。`status`/`event` 为总线约定消息，预留未来扩展。
 
 ## 4. 配置文件说明
 
@@ -295,20 +258,11 @@ JSON Schema：
 
 8 个按键（LButton/RButton/Space/q/w/e/r/t）各一组 `{key}_mode` / `{key}_interval` / `{key}_jitter`，含义与默认同 [Cyclone] 的鼠标键组。
 
-### [Bridge]（WebSocket 桥）
-
-| 键 | 含义 | 默认值 | 取值范围 |
-|----|------|--------|----------|
-| Enabled | 是否启用 WebSocket 桥 | 0 | 0 / 1（true/yes 亦为真） |
-| Port | 监听端口（仅 127.0.0.1） | 8322 | 1024-65535 |
-
 ### 模式取值说明
 
 `disabled` = 禁用、`spam` = 连点、`hold` = 按住不放。非法值回退默认。
 
-### 与 AHK 旧 ini 的迁移关系
-
-启动时若 `poe2_tools.ini` 不存在且存在 `ahk/poe2_key_helper.ini`，自动迁移（`config/migrate.py`）：AHK 旧 ini 为混合编码（UTF-8 BOM + GBK 节名「配置N」），逐行容错解码；模式字段 int（1/2/3）→ 字符串（disabled/spam/hold）；FindText 字库代码（`q_text`/`e_text`）与 Q/E 数字检测标定点为 AHK 私有功能，新版旋风页已移除该功能，迁移时丢弃。迁移不删除源文件。
+> 旧版 AHK 配置自动迁移（config/migrate.py）已随 ahk/ 目录于 2026-10-14 删除。
 
 ## 5. 时间规约表
 

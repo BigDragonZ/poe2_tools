@@ -69,9 +69,9 @@ def test_saved_uses_new_sections(temp_ini: Path) -> None:
     save_settings(Settings())
     text = temp_ini.read_text(encoding="utf-8")
     for section in ("[Combat]", "[Sort]", "[Tablet]", "[Map]",
-                    "[Profile1]", "[Currency]", "[Bridge]", "[Measure]", "[Dev]"):
+                    "[Profile1]", "[Currency]", "[Measure]", "[Dev]"):
         assert section in text
-    for legacy in ("[General]", "[Waystone]", "[Bag]", "[Cyclone]", "[Mapping]"):
+    for legacy in ("[General]", "[Waystone]", "[Bag]", "[Cyclone]", "[Mapping]", "[Bridge]"):
         assert legacy not in text
 
 

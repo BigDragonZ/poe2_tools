@@ -28,10 +28,18 @@ class HotkeyManager:
         """
         注册全局热键；同名重复注册先移除旧的。
         热键非法时记录日志并返回 False。
+
+        单键热键（f1/f12 等）用 on_press_key：add_hotkey 要求按下键集合精确匹配，
+        批量操作按住 Ctrl/Shift 时停止/急停热键会失效；组合键（ctrl+f7）仍用 add_hotkey。
         """
         self.unregister(name)
         try:
-            self._handlers[name] = keyboard.add_hotkey(hotkey, callback)
+            if "+" in hotkey or "," in hotkey:
+                self._handlers[name] = keyboard.add_hotkey(hotkey, callback)
+            else:
+                self._handlers[name] = keyboard.on_press_key(
+                    hotkey, lambda _event: callback()
+                )
             return True
         except Exception as exc:
             logger.warning("热键注册失败 %s (%s): %s", name, hotkey, exc)
@@ -54,10 +62,10 @@ class HotkeyManager:
 
     def unregister(self, name: str) -> None:
         """移除指定热键（不存在时忽略）。"""
-        handler = self._handlers.pop(name, None)
-        if handler is not None:
+        remover = self._handlers.pop(name, None)
+        if remover is not None:
             try:
-                keyboard.remove_hotkey(handler)
+                remover()  # type: ignore[operator]
             except Exception:
                 pass
 

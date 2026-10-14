@@ -15,6 +15,7 @@ import threading
 import time
 
 from poe2_tools.config.settings import (
+    MIN_INTERVAL_MS,
     MODE_HOLD,
     MODE_SPAM,
     KeyConfig,
@@ -37,7 +38,7 @@ class CombatMacro:
         self._logger = logger
         self._lock = threading.Lock()
         self._stop = threading.Event()
-        self._scheduler = SpamScheduler()
+        self._scheduler = SpamScheduler(min_interval_ms=MIN_INTERVAL_MS)
         self._held: list[str] = []
         self.active = False
 

@@ -8,9 +8,11 @@
 - general.sort（[Sort]）：背包整理热键、网格行列、格距与批量间隔
 - general.tablet（[Tablet]）：石碑速点热键、货币、级别与批量间隔
 - general.map_click（[Map]）：地图速点热键与批量间隔
+- general.map_vaal（[MapVaal]）：瓦地图热键、批量间隔与目标地图阶级
+- stash_ui（[StashUI]）：仓库界面布局（通货/Map 标签、阶级按钮、仓库页、地图格子）
 - dev（[Dev]/[Measure]）：调试开关、日志级别、开发页测量坐标与框选范围
 - market_scan（[MarketScan]）：通货市场抓取各阶段延时（坐标复用 [Measure] 槽位）
-- currency（[Currency]）、bridge（[Bridge]）：货币坐标与 WebSocket 桥
+- currency（[Currency]）：货币坐标
 
 读写通过 configparser，编码固定 UTF-8；坐标均为 POE2 客户区坐标
 （与 AHK 版约定一致）。读取向后兼容旧段名（[General]/[Waystone]/[Bag]），
@@ -53,17 +55,18 @@ DEF_DUMP_INTERVAL_MS = 30
 DEF_WAY_INTERVAL_MS = 100
 DEF_MAP_INTERVAL_MS = 100
 
-# 货币：蜕变/增幅/富豪/崇高/混沌分三级，二级 = 一级 +70px，三级 = +140px（向右）
+# 货币：蜕变/增幅/富豪/崇高/混沌分三级，二级 = 一级 +64px，三级 = +128px（向右，1600×1024 实测）
 CURRENCY_KEYS = ["trans", "aug", "regal", "ex", "chaos", "alch", "vaal", "whet", "scrap", "etch"]
 CURRENCY_NAMES = {
     "trans": "蜕变", "aug": "增幅", "regal": "富豪", "ex": "崇高", "chaos": "混沌",
     "alch": "点金石", "vaal": "瓦尔", "whet": "磨刀石", "scrap": "护甲片", "etch": "奥术师",
 }
 TIERED_KEYS = ["trans", "aug", "regal", "ex", "chaos"]
-TIER_SPACING = 70
+TIER_SPACING = 64
 
 # 地图速点固定流程：[[货币, 每格点击次数], ...]，完成后触发一次背包整理
-MAP_PHASES = [["alch", 1], ["ex", 4], ["vaal", 1]]
+# 点金石固定出 4 词，崇高×2 补满 6 词后瓦尔（原崇高×4 会多出 2 次无效点击）
+MAP_PHASES = [["alch", 1], ["ex", 2], ["vaal", 1]]
 # 瓦尔腐化有动画：最小间隔兜底（毫秒），避免漏点
 MAP_MIN_INTERVAL_MS = {"vaal": 500}
 
@@ -152,12 +155,56 @@ class MapClickSettings:
 
 
 @dataclass
+class MapVaalSettings:
+    """瓦地图分组（[MapVaal]）：仓库 Map 页批量取未满 6 词未污染图 →
+    背包内点金/崇高至 6 词 → 瓦前检查补满 → 盲点瓦尔 → 按阶级/数值/词缀分流存回。"""
+
+    hotkey: str = "ctrl+f7"
+    interval_ms: int = DEF_MAP_INTERVAL_MS
+    tier: int = 15  # 目标地图阶级（1~16）
+    # 瓦后分流阈值：物品稀有度+怪物效能 ≥ 该值存入「100 地图」仓
+    value_threshold: int = 100
+
+
+@dataclass
+class StashUISettings:
+    """仓库界面布局（[StashUI]）。
+
+    默认值为 2026-10-13 当前布局实测坐标（与 poe2_tools.ini 一致）；
+    分辨率/窗口布局变化时直接改 ini。注意标签列表纵坐标随选中页变化，
+    tab_* 均以「Map 页选中」状态实测为准（与存回阶段点击时状态一致）。
+    tier_cols/tier_rows：地图阶级按钮各列 x 与两行 y（I-VIII / IX-XVI）。
+    page_*：仓库页绿色按钮（第 1 页 x、间距、y、页数）。
+    stash_grid_*：地图仓库格子（第 1 格中心、格距、行列数）。
+    tab_map100：「100 地图」仓（高级地图仓下一行，瓦后数值分流用）。
+    """
+
+    tab_currency: Point = field(default_factory=lambda: Point(695, 108))
+    tab_map: Point = field(default_factory=lambda: Point(695, 135))
+    tab_advanced_map: Point = field(default_factory=lambda: Point(695, 590))
+    tab_map100: Point = field(default_factory=lambda: Point(695, 616))
+    tier_cols: list[int] = field(
+        default_factory=lambda: [82, 149, 216, 282, 349, 416, 482, 549]
+    )
+    tier_rows: list[int] = field(default_factory=lambda: [171, 233])
+    page_x0: int = 175
+    page_pitch: int = 57
+    page_y: int = 304
+    page_count: int = 6
+    stash_grid_origin: Point = field(default_factory=lambda: Point(63, 347))
+    stash_grid_cell: int = 46
+    stash_grid_rows: int = 8
+    stash_grid_cols: int = 12
+
+
+@dataclass
 class GeneralSettings:
-    """通用功能分组：背包整理 + 石碑速点 + 地图速点。"""
+    """通用功能分组：背包整理 + 石碑速点 + 地图速点 + 瓦地图。"""
 
     sort: SortSettings = field(default_factory=SortSettings)
     tablet: TabletSettings = field(default_factory=TabletSettings)
     map_click: MapClickSettings = field(default_factory=MapClickSettings)
+    map_vaal: MapVaalSettings = field(default_factory=MapVaalSettings)
 
 
 @dataclass
@@ -208,9 +255,8 @@ class Settings:
     general: GeneralSettings = field(default_factory=GeneralSettings)
     dev: DevSettings = field(default_factory=DevSettings)
     market_scan: MarketScanSettings = field(default_factory=MarketScanSettings)
+    stash_ui: StashUISettings = field(default_factory=StashUISettings)  # [StashUI]
     currency: dict[str, Point] = field(default_factory=dict)  # [Currency]
-    bridge_enabled: bool = False
-    bridge_port: int = 8322
 
 
 def default_key_config(key: str) -> KeyConfig:
@@ -301,6 +347,14 @@ def _read_range(config: configparser.ConfigParser, section: str, key: str) -> tu
     return (parts[0], parts[1], parts[2], parts[3])
 
 
+def _read_int_list(config: configparser.ConfigParser, section: str, key: str) -> list[int]:
+    """读取逗号分隔的整数列表（如 "115,210,305"）；缺失返回空列表。"""
+    raw = config.get(section, key, fallback="").strip()
+    if not raw:
+        return []
+    return [_to_int(p, 0) for p in raw.split(",") if p.strip()]
+
+
 # ============================================================
 # 加载 / 保存
 # ============================================================
@@ -364,6 +418,57 @@ def load_settings(path: Path | None = None) -> Settings:
         MIN_BATCH_INTERVAL_MS, MAX_BATCH_INTERVAL_MS,
     )
 
+    # 瓦地图分组：[MapVaal]
+    map_vaal = s.general.map_vaal
+    map_vaal.hotkey = _read_value(config, "MapVaal", "Hotkey") or "ctrl+f7"
+    map_vaal.interval_ms = _clamp(
+        _to_int(_read_value(config, "MapVaal", "Interval"), DEF_MAP_INTERVAL_MS),
+        MIN_BATCH_INTERVAL_MS, MAX_BATCH_INTERVAL_MS,
+    )
+    map_vaal.tier = _clamp(_to_int(_read_value(config, "MapVaal", "Tier"), 15), 1, 16)
+    map_vaal.value_threshold = _clamp(
+        _to_int(_read_value(config, "MapVaal", "ValueThreshold"), 100), 0, 1000
+    )
+
+    # 仓库界面布局：[StashUI]（缺失字段保留默认值）
+    ui = s.stash_ui
+    tab_currency = _read_point(config, "StashUI", "TabCurrency")
+    if tab_currency is not None:
+        ui.tab_currency = tab_currency
+    tab_map = _read_point(config, "StashUI", "TabMap")
+    if tab_map is not None:
+        ui.tab_map = tab_map
+    tab_advanced_map = _read_point(config, "StashUI", "TabAdvancedMap")
+    if tab_advanced_map is not None:
+        ui.tab_advanced_map = tab_advanced_map
+    tab_map100 = _read_point(config, "StashUI", "TabMap100")
+    if tab_map100 is not None:
+        ui.tab_map100 = tab_map100
+    tier_cols = _read_int_list(config, "StashUI", "TierCols")
+    if len(tier_cols) == 8:
+        ui.tier_cols = tier_cols
+    tier_rows = _read_int_list(config, "StashUI", "TierRows")
+    if len(tier_rows) == 2:
+        ui.tier_rows = tier_rows
+    ui.page_x0 = _to_int(_read_value(config, "StashUI", "PageX0"), ui.page_x0)
+    ui.page_pitch = _to_int(_read_value(config, "StashUI", "PagePitch"), ui.page_pitch)
+    ui.page_y = _to_int(_read_value(config, "StashUI", "PageY"), ui.page_y)
+    ui.page_count = _clamp(
+        _to_int(_read_value(config, "StashUI", "PageCount"), ui.page_count), 1, 20
+    )
+    grid_origin = _read_point(config, "StashUI", "GridOrigin")
+    if grid_origin is not None:
+        ui.stash_grid_origin = grid_origin
+    ui.stash_grid_cell = _clamp(
+        _to_int(_read_value(config, "StashUI", "GridCell"), ui.stash_grid_cell), 10, 200
+    )
+    ui.stash_grid_rows = _clamp(
+        _to_int(_read_value(config, "StashUI", "GridRows"), ui.stash_grid_rows), 1, 30
+    )
+    ui.stash_grid_cols = _clamp(
+        _to_int(_read_value(config, "StashUI", "GridCols"), ui.stash_grid_cols), 1, 30
+    )
+
     # 货币坐标（段名不变，未标定槽位省略）
     for key in CURRENCY_KEYS:
         point = _read_point(config, "Currency", key)
@@ -377,10 +482,6 @@ def load_settings(path: Path | None = None) -> Settings:
         for key in SKILL_KEYS:
             profile[key] = _read_key_config(config, section, key, default_key_config(key))
         s.combat.profiles[i] = profile
-
-    # WebSocket 桥（段名不变）
-    s.bridge_enabled = config.get("Bridge", "Enabled", fallback="0").strip() in ("1", "true", "yes")
-    s.bridge_port = _clamp(_to_int(config.get("Bridge", "Port", fallback="8322"), 8322), 1024, 65535)
 
     # 开发分组：[Dev] 调试开关与日志级别
     s.dev.debug = config.get("Dev", "Debug", fallback="0").strip() in ("1", "true", "yes")
@@ -463,6 +564,37 @@ def save_settings(s: Settings, path: Path | None = None) -> None:
     map_click = s.general.map_click
     config["Map"] = {"Hotkey": map_click.hotkey, "Interval": str(map_click.interval_ms)}
 
+    map_vaal = s.general.map_vaal
+    config["MapVaal"] = {
+        "Hotkey": map_vaal.hotkey,
+        "Interval": str(map_vaal.interval_ms),
+        "Tier": str(map_vaal.tier),
+        "ValueThreshold": str(map_vaal.value_threshold),
+    }
+
+    ui = s.stash_ui
+    config["StashUI"] = {
+        "TabCurrency_x": str(ui.tab_currency.x),
+        "TabCurrency_y": str(ui.tab_currency.y),
+        "TabMap_x": str(ui.tab_map.x),
+        "TabMap_y": str(ui.tab_map.y),
+        "TabAdvancedMap_x": str(ui.tab_advanced_map.x),
+        "TabAdvancedMap_y": str(ui.tab_advanced_map.y),
+        "TabMap100_x": str(ui.tab_map100.x),
+        "TabMap100_y": str(ui.tab_map100.y),
+        "TierCols": ",".join(str(v) for v in ui.tier_cols),
+        "TierRows": ",".join(str(v) for v in ui.tier_rows),
+        "PageX0": str(ui.page_x0),
+        "PagePitch": str(ui.page_pitch),
+        "PageY": str(ui.page_y),
+        "PageCount": str(ui.page_count),
+        "GridOrigin_x": str(ui.stash_grid_origin.x),
+        "GridOrigin_y": str(ui.stash_grid_origin.y),
+        "GridCell": str(ui.stash_grid_cell),
+        "GridRows": str(ui.stash_grid_rows),
+        "GridCols": str(ui.stash_grid_cols),
+    }
+
     currency_section: dict[str, str] = {}
     for key in CURRENCY_KEYS:
         if key in s.currency:
@@ -479,8 +611,6 @@ def save_settings(s: Settings, path: Path | None = None) -> None:
             section[f"{key}_interval"] = str(c.interval_ms)
             section[f"{key}_jitter"] = str(c.jitter_ms)
         config[f"Profile{i + 1}"] = section
-
-    config["Bridge"] = {"Enabled": "1" if s.bridge_enabled else "0", "Port": str(s.bridge_port)}
 
     measure_section: dict[str, str] = {}
     for i, p in sorted(s.dev.measure_points.items()):
@@ -521,7 +651,7 @@ def save_settings(s: Settings, path: Path | None = None) -> None:
 # ============================================================
 def currency_coord(s: Settings, key: str, tier: int = 1) -> Point | None:
     """
-    解析货币坐标：三级货币按级别向右偏移（二级 +70px，三级 +140px）。
+    解析货币坐标：三级货币按级别向右偏移（二级 +64px，三级 +128px，1600×1024 实测）。
     未标定返回 None。
     """
     if key not in s.currency:
