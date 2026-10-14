@@ -220,3 +220,142 @@ def test_currency_coord_tiered_offsets(tier: int, expected_x: int) -> None:
     s = Settings()
     s.currency["ex"] = Point(100, 200)
     assert currency_coord(s, "ex", tier) == Point(expected_x, 200)
+
+
+# ============================================================
+# 分辨率坐标档（@宽x高 分档段）
+# ============================================================
+RES = Point(1600, 1024)
+RES_OTHER = Point(2560, 1440)
+
+
+def test_profile_section_naming() -> None:
+    assert sm._profile_section("StashUI", RES) == "StashUI@1600x1024"
+    assert sm._profile_section("StashUI", None) == "StashUI"
+    s = Settings()
+    assert s.coords_profile == ""
+    s.resolution = RES
+    assert s.coords_profile == "1600x1024"
+
+
+def test_resolve_section_prefers_profile(temp_ini: Path) -> None:
+    """基础段与档段并存时读到档段值。"""
+    write_ini(temp_ini, "Currency", {"alch_x": "100", "alch_y": "200"})
+    write_ini(temp_ini, "Currency@1600x1024", {"alch_x": "300", "alch_y": "400"})
+    write_ini(temp_ini, "Sort", {"CellSize": "50"})
+    write_ini(temp_ini, "Sort@1600x1024", {"CellSize": "66"})
+    s = load_settings(resolution=RES)
+    assert s.currency["alch"] == Point(300, 400)
+    assert s.general.sort.cell_size == 66
+    assert s.coords_profile_exists is True
+
+
+def test_resolve_section_legacy_fallback(temp_ini: Path) -> None:
+    """无任何 @ 变体的老配置：任一分辨率回退基础段，但档标记为不存在。"""
+    write_ini(temp_ini, "Currency", {"alch_x": "100", "alch_y": "200"})
+    write_ini(temp_ini, "Sort", {"CellSize": "50"})
+    s = load_settings(resolution=RES)
+    assert s.currency["alch"] == Point(100, 200)
+    assert s.general.sort.cell_size == 50
+    assert s.coords_profile_exists is False
+
+
+def test_resolve_section_no_cross_resolution_fallback(temp_ini: Path) -> None:
+    """已有其他分辨率档时绝不回退基础段（杜绝跨分辨率坐标污染）。"""
+    write_ini(temp_ini, "Currency", {"alch_x": "100", "alch_y": "200"})
+    write_ini(temp_ini, "Currency@2560x1440", {"alch_x": "300", "alch_y": "400"})
+    write_ini(temp_ini, "Sort", {"CellSize": "50"})
+    write_ini(temp_ini, "Sort@2560x1440", {"CellSize": "80"})
+    s = load_settings(resolution=RES)
+    assert s.currency == {}
+    assert s.general.sort.cell_size == 0
+    assert s.coords_profile_exists is False
+
+
+def test_save_writes_profile_and_base(temp_ini: Path) -> None:
+    """带分辨率保存：基础段与档段双写；Sort 档段仅含 CellSize。"""
+    s = Settings(resolution=RES)
+    s.general.sort.cell_size = 70
+    s.currency["alch"] = Point(352, 238)
+    save_settings(s)
+    text = temp_ini.read_text(encoding="utf-8")
+    assert "[StashUI]" in text and "[StashUI@1600x1024]" in text
+    assert "[Currency@1600x1024]" in text and "[Measure@1600x1024]" in text
+    assert "[Sort@1600x1024]" in text
+    # 档优先读取回来
+    loaded = load_settings(resolution=RES)
+    assert loaded.general.sort.cell_size == 70
+    assert loaded.currency["alch"] == Point(352, 238)
+    assert loaded.coords_profile_exists is True
+    # Sort 档段只有 CellSize 一键
+    import configparser
+    config = configparser.ConfigParser()
+    config.optionxform = str
+    config.read(temp_ini, encoding="utf-8")
+    assert list(config["Sort@1600x1024"].keys()) == ["CellSize"]
+
+
+def test_save_preserves_other_profiles(temp_ini: Path) -> None:
+    """读改写：以一个分辨率保存不抹掉其他分辨率档段。"""
+    s1 = Settings(resolution=RES)
+    s1.currency["alch"] = Point(100, 200)
+    s1.general.sort.cell_size = 66
+    save_settings(s1)
+    s2 = Settings(resolution=RES_OTHER)
+    s2.currency["alch"] = Point(300, 400)
+    s2.general.sort.cell_size = 80
+    save_settings(s2)
+    text = temp_ini.read_text(encoding="utf-8")
+    assert "[Currency@1600x1024]" in text and "[Currency@2560x1440]" in text
+    assert "[Sort@1600x1024]" in text and "[Sort@2560x1440]" in text
+    assert load_settings(resolution=RES).currency["alch"] == Point(100, 200)
+    assert load_settings(resolution=RES_OTHER).currency["alch"] == Point(300, 400)
+    assert load_settings(resolution=RES).general.sort.cell_size == 66
+    assert load_settings(resolution=RES_OTHER).general.sort.cell_size == 80
+
+
+def test_profile_roundtrip_isolated(temp_ini: Path) -> None:
+    """档回环：写 R 档后以 R 读取一致，以其他分辨率读取为未标定。"""
+    s = Settings(resolution=RES)
+    s.currency["ex"] = Point(500, 600)
+    s.dev.measure_points[1] = Point(10, 20)
+    s.dev.measure_ranges[1] = (1, 2, 30, 40)
+    save_settings(s)
+    loaded = load_settings(resolution=RES)
+    assert loaded.currency["ex"] == Point(500, 600)
+    assert loaded.dev.measure_points[1] == Point(10, 20)
+    assert loaded.dev.measure_ranges[1] == (1, 2, 30, 40)
+    other = load_settings(resolution=RES_OTHER)
+    assert other.currency == {}
+    assert other.dev.measure_points == {}
+    assert other.coords_profile_exists is False
+
+
+def test_no_resolution_legacy_behavior(temp_ini: Path) -> None:
+    """resolution=None 时读写与分档前完全一致（不产生档段）。"""
+    s = Settings()
+    s.currency["alch"] = Point(352, 238)
+    s.general.sort.cell_size = 70
+    save_settings(s)
+    text = temp_ini.read_text(encoding="utf-8")
+    assert "@" not in text
+    loaded = load_settings()
+    assert loaded.currency["alch"] == Point(352, 238)
+    assert loaded.general.sort.cell_size == 70
+    assert loaded.resolution is None
+    assert loaded.coords_profile_exists is True
+
+
+def test_migration_materialize(temp_ini: Path) -> None:
+    """老配置（仅基础段）经 load(R) → save 物化为当前分辨率档。"""
+    write_ini(temp_ini, "Currency", {"alch_x": "100", "alch_y": "200"})
+    write_ini(temp_ini, "Sort", {"CellSize": "50"})
+    write_ini(temp_ini, "StashUI", {"GridCell": "52"})
+    s = load_settings(resolution=RES)
+    assert s.coords_profile_exists is False  # 尚未物化
+    save_settings(s)
+    reloaded = load_settings(resolution=RES)
+    assert reloaded.coords_profile_exists is True
+    assert reloaded.currency["alch"] == Point(100, 200)
+    assert reloaded.general.sort.cell_size == 50
+    assert reloaded.stash_ui.stash_grid_cell == 52

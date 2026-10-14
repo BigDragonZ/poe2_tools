@@ -140,9 +140,9 @@ class Poe2ToolsApp:
         self.root.minsize(1120, 660)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-        self._boot_logs: list[str] = []
-        self.settings = self._load_settings()
+        self._boot_logs: list[tuple[str, str]] = []
         window.configure_window_title(POE_WINDOW_TITLE)  # core 窗口绑定以配置标题为准
+        self.settings = self._load_settings()
         self.hotkeys = HotkeyManager()
         self.pending_calib: str | None = None
         self._marker: MarkSession | None = None
@@ -168,8 +168,8 @@ class Poe2ToolsApp:
         self.load_controls()
 
         bus.subscribe(self._on_bus_message)
-        for message in self._boot_logs:
-            self.log(message)
+        for message, level in self._boot_logs:
+            self.log(message, level)
 
         self.register_hotkeys()
         self.log(
@@ -192,15 +192,34 @@ class Poe2ToolsApp:
         self._switch_module("combat")
         self._sync_scope()
 
+        # 当前分辨率无坐标档：直接切到「研发-坐标」页引导标定
+        if self.settings.resolution is not None and not self.settings.coords_profile_exists:
+            self._switch_module("dev")
+            self.dev_module.select_page(2)  # 坐标页
+
         self._poll_status()
 
     # ============================================================
     # 配置加载
     # ============================================================
     def _load_settings(self) -> Settings:
-        """加载 ini 配置（旧版 AHK 迁移逻辑已随 ahk/ 目录移除）。"""
-        settings = load_settings()
-        self._boot_logs.append(f"已加载配置：{INI_PATH}")
+        """加载 ini 配置：按 POE2 客户区分辨率激活对应坐标档（仅启动时检测一次）。"""
+        size = window.client_size()  # 窗口未开返回 None
+        settings = load_settings(resolution=size)
+        self._boot_logs.append((f"已加载配置：{INI_PATH}", "INFO"))
+        if size is None:
+            self._boot_logs.append(
+                ("未检测到 POE2 窗口：坐标档未激活，使用基础配置", "WARN")
+            )
+        elif not settings.coords_profile_exists:
+            self._boot_logs.append((
+                f"当前分辨率 {settings.coords_profile} 没有坐标配置档：请按 F3/F4 标定背包格距，"
+                f"并在「研发-坐标/开发」页标定货币坐标与测量点"
+                f"（结果将写入 {settings.coords_profile} 档）",
+                "WARN",
+            ))
+        else:
+            self._boot_logs.append((f"坐标配置档：{settings.coords_profile}", "INFO"))
         return settings
 
     # ============================================================
@@ -218,6 +237,7 @@ class Poe2ToolsApp:
         self.map_var = tk.StringVar(value="空闲")
         self.profile_var = tk.StringVar(value="配置1")
         self.module_var = tk.StringVar(value=MODULE_NAMES["combat"])
+        self.coords_var = tk.StringVar(value="未激活")
 
         items = [
             ("POE2 前台", self.poe_var, "#22c55e"),
@@ -227,6 +247,7 @@ class Poe2ToolsApp:
             ("地图", self.map_var, "#f59e0b"),
             ("当前配置", self.profile_var, "#38bdf8"),
             ("当前模块", self.module_var, "#a78bfa"),
+            ("坐标档", self.coords_var, "#38bdf8"),
         ]
         for col, (label, var, color) in enumerate(items):
             ttk.Label(frame, text=f"{label}:").grid(row=0, column=col * 2, sticky=tk.W)
@@ -739,6 +760,12 @@ class Poe2ToolsApp:
             else "空闲"
         )
         self.profile_var.set(self._profile_name())
+        if self.settings.resolution is None:
+            self.coords_var.set("未激活")
+        elif self.settings.coords_profile_exists:
+            self.coords_var.set(self.settings.coords_profile)
+        else:
+            self.coords_var.set(f"{self.settings.coords_profile} 未标定")
         self.general_module.set_cell_size(self.settings.general.sort.cell_size)
         self.combat_module.refresh_cyclone_roi(self.cyclone_engine.config["vision"])
         self.dev_module.refresh_coords(self.settings)

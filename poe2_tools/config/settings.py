@@ -15,7 +15,9 @@
 - currency（[Currency]）：货币坐标
 
 读写通过 configparser，编码固定 UTF-8；坐标均为 POE2 客户区坐标
-（与 AHK 版约定一致）。读取向后兼容旧段名（[General]/[Waystone]/[Bag]），
+（与 AHK 版约定一致）。坐标类段（Sort.CellSize/StashUI/Currency/Measure）按
+"@宽x高" 后缀分分辨率档（如 [StashUI@1600x1024]），启动时按游戏客户区
+分辨率自动激活对应档。读取向后兼容旧段名（[General]/[Waystone]/[Bag]），
 保存只写新段名，首次保存后旧段自然消失。
 """
 
@@ -257,6 +259,16 @@ class Settings:
     market_scan: MarketScanSettings = field(default_factory=MarketScanSettings)
     stash_ui: StashUISettings = field(default_factory=StashUISettings)  # [StashUI]
     currency: dict[str, Point] = field(default_factory=dict)  # [Currency]
+    # 分辨率坐标档（启动时由 ui 层注入当前 POE2 客户区宽高，不直接参与 ini 读写）：
+    # 坐标类段按 "@宽x高" 后缀分档（见 PROFILED_SECTIONS）；coords_profile_exists
+    # 标记当前分辨率档是否已存在（False → ui 层提示进入标定流程）
+    resolution: Point | None = None
+    coords_profile_exists: bool = True
+
+    @property
+    def coords_profile(self) -> str:
+        """当前分辨率档名（如 "1600x1024"）；未检测到窗口时为 ""。"""
+        return f"{self.resolution.x}x{self.resolution.y}" if self.resolution else ""
 
 
 def default_key_config(key: str) -> KeyConfig:
@@ -356,11 +368,45 @@ def _read_int_list(config: configparser.ConfigParser, section: str, key: str) ->
 
 
 # ============================================================
+# 分辨率坐标档
+# ============================================================
+# 参与分档的坐标类段：段名加 "@宽x高" 后缀（如 [StashUI@1600x1024]）。
+# Sort 档段只含 CellSize（热键/行列/间隔与分辨率无关，不分档）。
+PROFILED_SECTIONS = ("Sort", "StashUI", "Currency", "Measure")
+
+
+def _profile_section(base: str, resolution: Point | None) -> str:
+    """分辨率档段名：有分辨率为 "base@宽x高"，否则为基础段名。"""
+    return f"{base}@{resolution.x}x{resolution.y}" if resolution else base
+
+
+def _resolve_section(
+    config: configparser.ConfigParser, base: str, resolution: Point | None
+) -> str | None:
+    """解析分档段实际读取的段名（回退规则杜绝跨分辨率坐标污染）。
+
+    1. 当前分辨率档 [base@R] 存在 → 只读它；
+    2. 档不存在且 base 没有任何 @ 变体（未迁移的老配置）→ 回退基础段；
+    3. 档不存在但已有其他分辨率变体 → None（字段保留默认值，不读基础段）。
+    """
+    if resolution is not None:
+        profile = _profile_section(base, resolution)
+        if config.has_section(profile):
+            return profile
+        if any(section.startswith(base + "@") for section in config.sections()):
+            return None
+    return base if config.has_section(base) else None
+
+
+# ============================================================
 # 加载 / 保存
 # ============================================================
-def load_settings(path: Path | None = None) -> Settings:
+def load_settings(path: Path | None = None, resolution: Point | None = None) -> Settings:
     """
     从 ini 加载配置；文件缺失或字段非法时使用默认值。
+
+    resolution 非 None 时坐标类段（Sort.CellSize/StashUI/Currency/Measure）
+    按 "@宽x高" 分辨率档读取（回退规则见 _resolve_section），其余段不受影响。
 
     向后兼容：新段（[Combat]/[Sort]/[Tablet]）的键为空时回退读旧段旧键
     （[General] CombatHotkey/DumpHotkey/ActiveProfile、[Bag]、[Waystone]），
@@ -376,6 +422,7 @@ def load_settings(path: Path | None = None) -> Settings:
             config.read_file(f)
 
     s = Settings()
+    s.resolution = resolution
 
     # 战斗分组：[Combat] ← 旧 [General] CombatHotkey/ActiveProfile
     s.combat.hotkey = _read_value(config, "Combat", "Hotkey", ("General", "CombatHotkey")) or "f2"
@@ -396,7 +443,13 @@ def load_settings(path: Path | None = None) -> Settings:
                 DEF_DUMP_INTERVAL_MS),
         MIN_BATCH_INTERVAL_MS, MAX_BATCH_INTERVAL_MS,
     )
-    sort.cell_size = _to_int(_read_value(config, "Sort", "CellSize", ("Bag", "CellSize")), 0)
+    # CellSize 按分辨率分档（档缺失时保留 0 = 未标定；旧 [Bag] 回退仅基础段适用）
+    sort_sec = _resolve_section(config, "Sort", resolution)
+    if sort_sec is None and resolution is None:
+        sort_sec = "Sort"  # 无分辨率：保持旧行为（段不存在也可走旧 [Bag] 回退）
+    if sort_sec is not None:
+        legacy = ("Bag", "CellSize") if sort_sec == "Sort" else None
+        sort.cell_size = _to_int(_read_value(config, sort_sec, "CellSize", legacy), 0)
 
     # 石碑速点分组：[Tablet] ← 旧 [Waystone]
     tablet = s.general.tablet
@@ -430,48 +483,50 @@ def load_settings(path: Path | None = None) -> Settings:
         _to_int(_read_value(config, "MapVaal", "ValueThreshold"), 100), 0, 1000
     )
 
-    # 仓库界面布局：[StashUI]（缺失字段保留默认值）
+    # 仓库界面布局：[StashUI]（按分辨率分档；档缺失时保留默认值 = 未标定）
+    ui_sec = _resolve_section(config, "StashUI", resolution) or ""
     ui = s.stash_ui
-    tab_currency = _read_point(config, "StashUI", "TabCurrency")
+    tab_currency = _read_point(config, ui_sec, "TabCurrency")
     if tab_currency is not None:
         ui.tab_currency = tab_currency
-    tab_map = _read_point(config, "StashUI", "TabMap")
+    tab_map = _read_point(config, ui_sec, "TabMap")
     if tab_map is not None:
         ui.tab_map = tab_map
-    tab_advanced_map = _read_point(config, "StashUI", "TabAdvancedMap")
+    tab_advanced_map = _read_point(config, ui_sec, "TabAdvancedMap")
     if tab_advanced_map is not None:
         ui.tab_advanced_map = tab_advanced_map
-    tab_map100 = _read_point(config, "StashUI", "TabMap100")
+    tab_map100 = _read_point(config, ui_sec, "TabMap100")
     if tab_map100 is not None:
         ui.tab_map100 = tab_map100
-    tier_cols = _read_int_list(config, "StashUI", "TierCols")
+    tier_cols = _read_int_list(config, ui_sec, "TierCols")
     if len(tier_cols) == 8:
         ui.tier_cols = tier_cols
-    tier_rows = _read_int_list(config, "StashUI", "TierRows")
+    tier_rows = _read_int_list(config, ui_sec, "TierRows")
     if len(tier_rows) == 2:
         ui.tier_rows = tier_rows
-    ui.page_x0 = _to_int(_read_value(config, "StashUI", "PageX0"), ui.page_x0)
-    ui.page_pitch = _to_int(_read_value(config, "StashUI", "PagePitch"), ui.page_pitch)
-    ui.page_y = _to_int(_read_value(config, "StashUI", "PageY"), ui.page_y)
+    ui.page_x0 = _to_int(_read_value(config, ui_sec, "PageX0"), ui.page_x0)
+    ui.page_pitch = _to_int(_read_value(config, ui_sec, "PagePitch"), ui.page_pitch)
+    ui.page_y = _to_int(_read_value(config, ui_sec, "PageY"), ui.page_y)
     ui.page_count = _clamp(
-        _to_int(_read_value(config, "StashUI", "PageCount"), ui.page_count), 1, 20
+        _to_int(_read_value(config, ui_sec, "PageCount"), ui.page_count), 1, 20
     )
-    grid_origin = _read_point(config, "StashUI", "GridOrigin")
+    grid_origin = _read_point(config, ui_sec, "GridOrigin")
     if grid_origin is not None:
         ui.stash_grid_origin = grid_origin
     ui.stash_grid_cell = _clamp(
-        _to_int(_read_value(config, "StashUI", "GridCell"), ui.stash_grid_cell), 10, 200
+        _to_int(_read_value(config, ui_sec, "GridCell"), ui.stash_grid_cell), 10, 200
     )
     ui.stash_grid_rows = _clamp(
-        _to_int(_read_value(config, "StashUI", "GridRows"), ui.stash_grid_rows), 1, 30
+        _to_int(_read_value(config, ui_sec, "GridRows"), ui.stash_grid_rows), 1, 30
     )
     ui.stash_grid_cols = _clamp(
-        _to_int(_read_value(config, "StashUI", "GridCols"), ui.stash_grid_cols), 1, 30
+        _to_int(_read_value(config, ui_sec, "GridCols"), ui.stash_grid_cols), 1, 30
     )
 
-    # 货币坐标（段名不变，未标定槽位省略）
+    # 货币坐标（按分辨率分档；档缺失时全部未标定）
+    cur_sec = _resolve_section(config, "Currency", resolution) or ""
     for key in CURRENCY_KEYS:
-        point = _read_point(config, "Currency", key)
+        point = _read_point(config, cur_sec, key)
         if point is not None:
             s.currency[key] = point
 
@@ -488,13 +543,14 @@ def load_settings(path: Path | None = None) -> Settings:
     log_level = config.get("Dev", "LogLevel", fallback="INFO").strip().upper()
     s.dev.log_level = log_level if log_level in LOG_LEVELS else "INFO"
 
-    # 开发页测量数据（段名不变）
+    # 开发页测量数据（按分辨率分档；档缺失时全部未标定）
+    ms_sec = _resolve_section(config, "Measure", resolution) or ""
     for i in range(1, MEASURE_POINT_COUNT + 1):
-        point = _read_point(config, "Measure", f"point{i}")
+        point = _read_point(config, ms_sec, f"point{i}")
         if point is not None:
             s.dev.measure_points[i] = point
     for i in range(1, MEASURE_RANGE_COUNT + 1):
-        rect = _read_range(config, "Measure", f"range{i}")
+        rect = _read_range(config, ms_sec, f"range{i}")
         if rect is not None:
             s.dev.measure_ranges[i] = rect
 
@@ -533,14 +589,42 @@ def load_settings(path: Path | None = None) -> Settings:
         _to_int(config.get("MarketScan", "RangeOffsetX", fallback="-10"), -10), -500, 500)
     ms.range_offset_y = _clamp(
         _to_int(config.get("MarketScan", "RangeOffsetY", fallback="20"), 20), -500, 500)
+
+    # 当前分辨率坐标档是否已存在（任一坐标档段存在即视为已有档）
+    if resolution is not None:
+        s.coords_profile_exists = any(
+            config.has_section(_profile_section(base, resolution))
+            for base in PROFILED_SECTIONS
+        )
     return s
 
 
 def save_settings(s: Settings, path: Path | None = None) -> None:
-    """把配置写入 ini（UTF-8）。只写新段名，全量重写（未标定槽位省略）。"""
+    """
+    把配置写入 ini（UTF-8）。只写新段名（未标定槽位省略）。
+
+    读改写：自有段（含旧版 legacy 段与当前分辨率档段）全量重写，
+    其他分辨率的坐标档段（[StashUI@宽x高] 等）原样保留。
+    s.resolution 非 None 时，坐标类段在基础段之外额外套写一份当前档。
+    """
     ini = path or INI_PATH
     config = configparser.ConfigParser()
     config.optionxform = str
+    if ini.exists():
+        with open(ini, "r", encoding="utf-8") as f:
+            config.read_file(f)
+    owned = {
+        "Combat", "Sort", "Tablet", "Map", "MapVaal", "StashUI",
+        "Currency", "Measure", "Dev", "MarketScan",
+        # 旧版 legacy 段：首次保存后自然消失
+        "General", "Bag", "Waystone", "Cyclone", "Mapping",
+        *(f"Profile{i + 1}" for i in range(PROFILE_COUNT)),
+    }
+    if s.resolution is not None:
+        owned |= {_profile_section(base, s.resolution) for base in PROFILED_SECTIONS}
+    for section in list(config.sections()):
+        if section in owned:
+            config.remove_section(section)
 
     config["Combat"] = {
         "Hotkey": s.combat.hotkey,
@@ -573,7 +657,7 @@ def save_settings(s: Settings, path: Path | None = None) -> None:
     }
 
     ui = s.stash_ui
-    config["StashUI"] = {
+    stash_ui_section = {
         "TabCurrency_x": str(ui.tab_currency.x),
         "TabCurrency_y": str(ui.tab_currency.y),
         "TabMap_x": str(ui.tab_map.x),
@@ -594,6 +678,7 @@ def save_settings(s: Settings, path: Path | None = None) -> None:
         "GridRows": str(ui.stash_grid_rows),
         "GridCols": str(ui.stash_grid_cols),
     }
+    config["StashUI"] = stash_ui_section
 
     currency_section: dict[str, str] = {}
     for key in CURRENCY_KEYS:
@@ -640,6 +725,13 @@ def save_settings(s: Settings, path: Path | None = None) -> None:
         "CurrencyA": ms.currency_a,
         "CurrencyB": ms.currency_b,
     }
+
+    # 分辨率坐标档：与基础段同内容套写（Sort 档仅 CellSize；其他分辨率的档段已在开头保留）
+    if s.resolution is not None:
+        config[_profile_section("Sort", s.resolution)] = {"CellSize": str(sort.cell_size)}
+        config[_profile_section("StashUI", s.resolution)] = dict(stash_ui_section)
+        config[_profile_section("Currency", s.resolution)] = dict(currency_section)
+        config[_profile_section("Measure", s.resolution)] = dict(measure_section)
 
     ini.parent.mkdir(parents=True, exist_ok=True)
     with open(ini, "w", encoding="utf-8") as f:

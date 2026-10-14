@@ -29,9 +29,10 @@ class CoordsTab(ttk.Frame):
 
     def __init__(self, master: tk.Misc, on_calibrate: Callable[[str], None]) -> None:
         super().__init__(master, padding=8)
+        self._profile_var = tk.StringVar()
         ttk.Label(
             self,
-            text="货币坐标：石碑/地图速点依赖此处标定（客户区坐标）",
+            textvariable=self._profile_var,
             foreground="#64748b",
         ).pack(anchor=tk.W)
 
@@ -65,7 +66,11 @@ class CoordsTab(ttk.Frame):
         )
 
     def refresh_coords(self, settings: Settings) -> None:
-        """刷新全部货币坐标显示。"""
+        """刷新全部货币坐标与当前分辨率档显示。"""
+        profile = settings.coords_profile or "未激活"
+        self._profile_var.set(
+            f"货币坐标：石碑/地图速点依赖此处标定（客户区坐标，当前档：{profile}）"
+        )
         for key, var in self._coord_vars.items():
             point = settings.currency.get(key)
             var.set(f"({point.x}, {point.y})" if point is not None else "未标定")
